@@ -1,0 +1,10 @@
+services:
+  cloudflared-dashboard:
+    image: cloudflare/cloudflared:latest
+    container_name: omlx-dashboard-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

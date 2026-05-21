@@ -1,0 +1,34 @@
+# ── Local environment and secrets ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Runtime state (generated; never committed) ────────────────────────────────
+.runtime/
+.vm/
+.cache/
+
+# ── Logs and process files ────────────────────────────────────────────────────
+*.log
+*.pid
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Node / npm ────────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# ── Docker local data (named volumes are managed by Docker, not git) ──────────
+docker/.data/
+docker/.workspace/

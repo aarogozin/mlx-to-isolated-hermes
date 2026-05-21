@@ -1,0 +1,153 @@
+name: Build & Push Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  lint:
+    name: Shell lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check shell syntax
+        run: |
+          find scripts -name '*.sh' -print0 \
+            | xargs -0 -I{} bash -n {} \
+            && echo "All scripts passed syntax check."
+
+  build-push:
+    name: Build & Push (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    needs: lint
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The primary target platform — Apple Silicon / AWS Graviton ARM64.
+          - platform: linux/arm64
+            suffix: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (for cross-compilation on GitHub-hosted runners)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read VERSION file
+        id: version
+        run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Tag with full semver on version tags (v0.1.0 → 0.1.0)
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # Tag with branch name on branch pushes
+            type=ref,event=branch
+            # Tag PRs as pr-<number>
+            type=ref,event=pr
+            # Always add short SHA for traceability
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=omlx-agent-hermes
+            org.opencontainers.image.description=Hermes Agent sandbox for Apple Silicon oMLX stack
+            org.opencontainers.image.vendor=aarogozin
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.value }}
+            BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+            VCS_REF=${{ github.sha }}
+          # GitHub Actions cache to speed up repeat builds
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,scope=${{ matrix.platform }},mode=max
+
+      - name: Print image digest
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Image pushed:"
+          echo "  Digest : ${{ steps.build.outputs.digest }}"
+          echo "  Tags   : ${{ steps.meta.outputs.tags }}"
+
+  # Smoke-test: verify the image runs and hermes --help works.
+  smoke-test:
+    name: Smoke test
+    runs-on: ubuntu-latest
+    needs: build-push
+    # Only on pushes (not PRs — image won't exist in the registry for PRs).
+    if: github.event_name != 'pull_request'
+    permissions:
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Pull and verify image
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name == 'main' && 'main' || github.sha }}"
+          docker pull --platform linux/arm64 "${IMAGE}" || \
+            docker pull --platform linux/arm64 "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-$(echo '${{ github.sha }}' | head -c 7)"
+          echo "Image labels:"
+          docker inspect --format='{{range $k,$v := .Config.Labels}}  {{$k}}={{$v}}
+{{end}}' "${IMAGE}" 2>/dev/null || true
+          echo "==> hermes --help"
+          docker run --rm --platform linux/arm64 "${IMAGE}" \
+            /opt/hermes/.venv/bin/hermes --help | head -5

@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          # Extract the section for the current version from CHANGELOG.md
+          VERSION="${{ steps.version.outputs.value }}"
+          body="$(awk "/^## ${VERSION}/{flag=1; next} /^## /{flag=0} flag" CHANGELOG.md | sed '/^[[:space:]]*$/d')"
+          if [[ -z "${body}" ]]; then
+            body="Release ${VERSION}"
+          fi
+          # Write to a file to avoid shell quoting issues
+          printf '%s\n' "${body}" > /tmp/release_notes.md
+          echo "body_path=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.version.outputs.value }}"
+          body_path: ${{ steps.changelog.outputs.body_path }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.value, '-') }}
