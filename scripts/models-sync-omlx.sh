@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${PROJECT_ROOT}/.env"
 ENV_SET="${SCRIPT_DIR}/env-set.sh"
-RUNTIME_MODEL_DIR="${PROJECT_ROOT}/.runtime/omlx-models"
+
 RUNTIME_CATALOG="${PROJECT_ROOT}/.runtime/lmstudio-models.json"
 LMS_BIN="${HOME}/.lmstudio/bin/lms"
 # MODEL_DEFAULT_STRATEGY controls which model is auto-selected when MODEL/MODEL_NAME
@@ -27,16 +27,25 @@ if [[ ! -x "${LMS_BIN}" ]]; then
   LMS_BIN="$(command -v lms)"
 fi
 
-mkdir -p "${RUNTIME_MODEL_DIR}"
+# Detect LM Studio models directory
+if [[ -d "${HOME}/.lmstudio/models" ]]; then
+  LMSTUDIO_MODEL_DIR="${HOME}/.lmstudio/models"
+elif [[ -d "${HOME}/Library/Application Support/LM Studio/models" ]]; then
+  LMSTUDIO_MODEL_DIR="${HOME}/Library/Application Support/LM Studio/models"
+else
+  LMSTUDIO_MODEL_DIR="${HOME}/.lmstudio/models"
+fi
 
-json="$("${LMS_BIN}" ls --json)"
+mkdir -p "${PROJECT_ROOT}/.runtime"
+
+json="$("${LMS_BIN}" ls --json 2>/dev/null || printf '[]')"
 
 printf '%s\n' "${json}" | jq --arg home "${HOME}" '
   [
     .[]
     | select(.type == "llm" and .format == "safetensors")
     | {
-        id: .modelKey,
+        id: (.path | split("/") | last),
         modelKey: .modelKey,
         displayName: .displayName,
         publisher: .publisher,
@@ -53,17 +62,7 @@ printf '%s\n' "${json}" | jq --arg home "${HOME}" '
   ]
 ' > "${RUNTIME_CATALOG}"
 
-printf '%s\n' "${json}" | jq -r --arg home "${HOME}" --arg out "${RUNTIME_MODEL_DIR}" '
-  .[]
-  | select(.type == "llm" and .format == "safetensors")
-  | [.modelKey, .path, (.sizeBytes | tostring), ((.trainedForToolUse // false) | tostring)]
-  | @tsv
-' | while IFS=$'\t' read -r model_key rel_path _size _tool; do
-  src="${HOME}/.lmstudio/models/${rel_path}"
-  if [[ -f "${src}/config.json" ]]; then
-    ln -sfn "${src}" "${RUNTIME_MODEL_DIR}/${model_key}"
-  fi
-done
+
 
 requested="${MODEL:-${MODEL_NAME:-}}"
 if [[ -n "${requested}" ]]; then
@@ -82,49 +81,28 @@ if [[ -z "${selected}" ]]; then
   case "${MODEL_DEFAULT_STRATEGY:-largest-tool}" in
     largest-tool)
       selected="$(
-        printf '%s\n' "${json}" | jq -r '
-          [
-            .[]
-            | select(.type == "llm" and .format == "safetensors")
-          ]
-          | sort_by((.trainedForToolUse // false | not), -.sizeBytes)
-          | .[0].modelKey // empty
-        '
+        jq -r '
+          (map(select(.trainedForToolUse == true)) | sort_by(-.sizeBytes) | .[0].id // empty)
+          // (sort_by(-.sizeBytes) | .[0].id // empty)
+        ' "${RUNTIME_CATALOG}"
       )"
       ;;
     smallest-tool)
       selected="$(
-        printf '%s\n' "${json}" | jq -r '
-          [
-            .[]
-            | select(.type == "llm" and .format == "safetensors")
-          ]
-          | sort_by((.trainedForToolUse // false | not), .sizeBytes)
-          | .[0].modelKey // empty
-        '
+        jq -r '
+          (map(select(.trainedForToolUse == true)) | sort_by(.sizeBytes) | .[0].id // empty)
+          // (sort_by(.sizeBytes) | .[0].id // empty)
+        ' "${RUNTIME_CATALOG}"
       )"
       ;;
     largest)
       selected="$(
-        printf '%s\n' "${json}" | jq -r '
-          [
-            .[]
-            | select(.type == "llm" and .format == "safetensors")
-          ]
-          | sort_by(-.sizeBytes)
-          | .[0].modelKey // empty
-        '
+        jq -r 'sort_by(-.sizeBytes) | .[0].id // empty' "${RUNTIME_CATALOG}"
       )"
       ;;
     first|*)
       selected="$(
-        printf '%s\n' "${json}" | jq -r '
-          [
-            .[]
-            | select(.type == "llm" and .format == "safetensors")
-          ]
-          | .[0].modelKey // empty
-        '
+        jq -r '.[0].id // empty' "${RUNTIME_CATALOG}"
       )"
       ;;
   esac
@@ -135,14 +113,14 @@ if [[ -z "${selected}" ]]; then
   exit 1
 fi
 
-"${ENV_SET}" "${ENV_FILE}" MODEL_DIR "${RUNTIME_MODEL_DIR}"
+"${ENV_SET}" "${ENV_FILE}" MODEL_DIR "${LMSTUDIO_MODEL_DIR}"
 "${ENV_SET}" "${ENV_FILE}" MODEL_NAME "${selected}"
 "${ENV_SET}" "${ENV_FILE}" OPENAI_BASE_URL "http://localhost:8000/v1"
 "${ENV_SET}" "${ENV_FILE}" ANTHROPIC_BASE_URL "http://localhost:8000"
 "${ENV_SET}" "${ENV_FILE}" OPENAI_BASE_URL_GUEST "http://model-host.internal:8000/v1"
 "${ENV_SET}" "${ENV_FILE}" ANTHROPIC_BASE_URL_GUEST "http://model-host.internal:8000"
 
-echo "Synced oMLX model dir: ${RUNTIME_MODEL_DIR}"
+echo "Using LM Studio models dir: ${LMSTUDIO_MODEL_DIR}"
 echo "Catalog: ${RUNTIME_CATALOG}"
 echo "Selected model: ${selected}"
 echo

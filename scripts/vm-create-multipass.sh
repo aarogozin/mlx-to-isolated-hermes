@@ -28,7 +28,11 @@ VM_SSH_KEY="${VM_SSH_KEY:-${HOME}/.ssh/omlx_agent_vm_ed25519}"
 USER_SSH_PUBLIC_KEY="${USER_SSH_PUBLIC_KEY:-${HOME}/.ssh/id_ed25519.pub}"
 VM_SNAPSHOT_NAME="${VM_SNAPSHOT_NAME:-clean-agent-base}"
 OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
+OBSIDIAN_GUEST_PATH="${OBSIDIAN_GUEST_PATH:-/mnt/obsidian}"
+SHARED_MOUNTS_REQUIRED="${SHARED_MOUNTS_REQUIRED:-0}"
 UBUNTU_MULTIPASS_IMAGE="${UBUNTU_MULTIPASS_IMAGE:-24.04}"
+MULTIPASS_LAUNCH_TIMEOUT="${MULTIPASS_LAUNCH_TIMEOUT:-900}"
+VM_PACKAGE_UPGRADE="${VM_PACKAGE_UPGRADE:-false}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY}}"
 
@@ -141,7 +145,7 @@ ${public_keys_yaml}
 ssh_pwauth: false
 disable_root: true
 package_update: true
-package_upgrade: true
+package_upgrade: ${VM_PACKAGE_UPGRADE}
 packages:
   - openssh-server
   - ca-certificates
@@ -154,11 +158,8 @@ packages:
   - python3
   - python3-pip
   - python3-venv
-  - nodejs
-  - npm
 write_files:
   - path: /usr/local/sbin/update-model-host-alias
-    permissions: "0755"
     content: |
       #!/usr/bin/env bash
       set -euo pipefail
@@ -170,7 +171,6 @@ write_files:
       printf '%s model-host.internal\n' "\${gateway}" >> /etc/hosts.tmp
       mv /etc/hosts.tmp /etc/hosts
   - path: /etc/systemd/system/model-host-alias.service
-    permissions: "0644"
     content: |
       [Unit]
       Description=Map model-host.internal to the default gateway
@@ -185,7 +185,6 @@ write_files:
       [Install]
       WantedBy=multi-user.target
   - path: /etc/profile.d/local-model-server.sh
-    permissions: "0644"
     content: |
       export OPENAI_BASE_URL=\${OPENAI_BASE_URL:-http://model-host.internal:8000/v1}
       export ANTHROPIC_BASE_URL=\${ANTHROPIC_BASE_URL:-http://model-host.internal:8000}
@@ -195,10 +194,11 @@ runcmd:
   - mkdir -p /mnt/obsidian
   - mkdir -p /home/${VM_SSH_USER}/workspace /home/${VM_SSH_USER}/.hermes /home/${VM_SSH_USER}/.local/bin
   - chown -R ${VM_SSH_USER}:${VM_SSH_USER} /home/${VM_SSH_USER}/workspace /home/${VM_SSH_USER}/.hermes /home/${VM_SSH_USER}/.local
+  - chmod 0755 /usr/local/sbin/update-model-host-alias
+  - chmod 0644 /etc/systemd/system/model-host-alias.service /etc/profile.d/local-model-server.sh
   - systemctl daemon-reload
   - systemctl enable --now model-host-alias.service
   - systemctl enable --now ssh
-  - npm install -g pnpm@10 || true
 final_message: "omlx-agent Multipass Ubuntu VM is ready after \$UPTIME seconds"
 EOF
 }
@@ -215,6 +215,7 @@ create_instance() {
     --cpus "${VM_CPUS}" \
     --memory "${VM_MEMORY}" \
     --disk "${VM_DISK}" \
+    --timeout "${MULTIPASS_LAUNCH_TIMEOUT}" \
     --cloud-init "${CLOUD_INIT}"
 }
 
@@ -224,16 +225,20 @@ configure_shared_folder() {
   fi
 
   log "Mounting Obsidian knowledge folder"
-
-  [[ -d "${OBSIDIAN_SHARED_PATH}" ]] || die "OBSIDIAN_SHARED_PATH does not exist: ${OBSIDIAN_SHARED_PATH}"
-  multipass exec "${VM_NAME}" -- sudo mkdir -p /mnt/obsidian
-  multipass mount "${OBSIDIAN_SHARED_PATH}" "${VM_NAME}:/mnt/obsidian"
+  if ! OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH}" \
+    OBSIDIAN_GUEST_PATH="${OBSIDIAN_GUEST_PATH}" \
+    VM_NAME="${VM_NAME}" \
+    "${SCRIPT_DIR}/shared-mounts.sh" sync multipass; then
+    if [[ "${SHARED_MOUNTS_REQUIRED}" == "1" ]]; then
+      die "shared folder mount failed"
+    fi
+    echo "WARNING: shared folder mount failed; continuing because SHARED_MOUNTS_REQUIRED=0."
+  fi
 }
 
 write_state() {
   mkdir -p "${STATE_DIR}"
   cat > "${STATE_DIR}/${VM_NAME}.env" <<EOF
-VM_ENGINE=$(shell_quote "multipass")
 VM_NAME=$(shell_quote "${VM_NAME}")
 VM_SSH_USER=$(shell_quote "${VM_SSH_USER}")
 VM_SSH_KEY=$(shell_quote "${VM_SSH_KEY}")
@@ -241,7 +246,6 @@ USER_SSH_PUBLIC_KEY=$(shell_quote "${USER_SSH_PUBLIC_KEY}")
 VM_SNAPSHOT_NAME=$(shell_quote "${VM_SNAPSHOT_NAME}")
 EOF
 
-  set_env_value VM_ENGINE "multipass"
   set_env_value VM_NAME "${VM_NAME}"
   set_env_value VM_CPUS "${VM_CPUS}"
   set_env_value VM_MEMORY "${VM_MEMORY}"
@@ -251,6 +255,8 @@ EOF
   set_env_value USER_SSH_PUBLIC_KEY "${USER_SSH_PUBLIC_KEY}"
   set_env_value VM_SNAPSHOT_NAME "${VM_SNAPSHOT_NAME}"
   set_env_value UBUNTU_MULTIPASS_IMAGE "${UBUNTU_MULTIPASS_IMAGE}"
+  set_env_value MULTIPASS_LAUNCH_TIMEOUT "${MULTIPASS_LAUNCH_TIMEOUT}"
+  set_env_value VM_PACKAGE_UPGRADE "${VM_PACKAGE_UPGRADE}"
 }
 
 main() {

@@ -2,7 +2,6 @@
 # scripts/dashboard-control.sh — Start/stop/status the Hermes Dashboard.
 #
 # Supports DASHBOARD_TARGET=vm (default) and DASHBOARD_TARGET=docker.
-# VM paths work with VM_ENGINE=multipass and VM_ENGINE=vmware/fusion.
 
 set -euo pipefail
 
@@ -10,6 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${PROJECT_ROOT}/.env"
 RUNTIME_DIR="${PROJECT_ROOT}/.runtime"
+
+OVERRIDE_DASHBOARD_TARGET="${DASHBOARD_TARGET:-}"
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -22,12 +23,13 @@ fi
 source "${SCRIPT_DIR}/vm-common.sh"
 
 ACTION="${1:-status}"
-TARGET="${DASHBOARD_TARGET:-vm}"
+TARGET="${OVERRIDE_DASHBOARD_TARGET:-${DASHBOARD_TARGET:-vm}}"
 VM_NAME="${VM_NAME:-omlx-agent-ubuntu}"
 VM_SSH_USER="${VM_SSH_USER:-agent}"
 VM_SSH_KEY="${VM_SSH_KEY:-${HOME}/.ssh/omlx_agent_vm_ed25519}"
 DOCKER_NAME="${DOCKER_NAME:-omlx-agent-docker}"
 HERMES_DASHBOARD_PORT="${HERMES_DASHBOARD_PORT:-9119}"
+DOCKER_DASHBOARD_PORT="${DOCKER_DASHBOARD_PORT:-9120}"
 HERMES_DASHBOARD_TUI="${HERMES_DASHBOARD_TUI:-1}"
 LOCAL_DASHBOARD_HOST="${LOCAL_DASHBOARD_HOST:-127.0.0.1}"
 TUNNEL_PID_FILE="${RUNTIME_DIR}/dashboard-${VM_NAME}-${HERMES_DASHBOARD_PORT}.pid"
@@ -47,7 +49,11 @@ die() {
 }
 
 dashboard_url() {
-  printf 'http://%s:%s\n' "${LOCAL_DASHBOARD_HOST}" "${HERMES_DASHBOARD_PORT}"
+  local port="${HERMES_DASHBOARD_PORT}"
+  if [[ "${TARGET}" == "docker" ]]; then
+    port="${DOCKER_DASHBOARD_PORT}"
+  fi
+  printf 'http://%s:%s\n' "${LOCAL_DASHBOARD_HOST}" "${port}"
 }
 
 dashboard_flags() {
@@ -59,10 +65,14 @@ dashboard_flags() {
 }
 
 port_listening() {
-  lsof -nP -iTCP:"${HERMES_DASHBOARD_PORT}" -sTCP:LISTEN >/dev/null 2>&1
+  local port="${HERMES_DASHBOARD_PORT}"
+  if [[ "${TARGET}" == "docker" ]]; then
+    port="${DOCKER_DASHBOARD_PORT}"
+  fi
+  lsof -nP -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1
 }
 
-# ── SSH tunnel helpers (engine-agnostic: uses get_vm_ip from vm-common.sh) ───
+# ── SSH tunnel helpers ────────────────────────────────────────────────────────
 
 _ssh_opts_array() {
   printf '%s\0' \
@@ -111,10 +121,7 @@ ensure_vm_dashboard_dependencies() {
 
 start_vm_dashboard() {
   require_vm_ready
-
-  case "${VM_ENGINE:-multipass}" in
-    multipass) multipass start "${VM_NAME}" >/dev/null 2>&1 || true ;;
-  esac
+  multipass start "${VM_NAME}" >/dev/null 2>&1 || true
 
   ensure_vm_dashboard_dependencies
 
@@ -276,48 +283,31 @@ docker_exec() {
 
 start_docker() {
   docker_ensure
-  local flags
-  flags="$(dashboard_flags 0.0.0.0 9119)"
-  docker_exec "source /opt/data/.env 2>/dev/null || true
-    mkdir -p /opt/data/logs
-    dashboard_pid=\"\$(ps -eo pid=,args= \
-      | awk -v p1=\"/venv/bin/hermes\" -v p2=\" dashboard\" \
-        'index(\$0,p1) && index(\$0,p2) && !index(\$0,\"--status\") && !index(\$0,\"--stop\") { print \$1; exit }')\"
-    if [[ -n \"\$dashboard_pid\" ]]; then
-      echo \"\$dashboard_pid\" > /opt/data/dashboard.pid
-      echo \"Hermes dashboard already running in Docker: PID \$dashboard_pid\"
-    else
-      nohup hermes dashboard ${flags}--insecure > /opt/data/logs/dashboard.log 2>&1 </dev/null &
-      echo \"\$!\" > /opt/data/dashboard.pid
-      echo \"Started Hermes dashboard in Docker: PID \$(cat /opt/data/dashboard.pid)\"
-    fi"
+  docker start "${DOCKER_NAME}" >/dev/null
   echo "Hermes dashboard: $(dashboard_url)"
 }
 
 stop_docker() {
-  docker_ensure
-  docker_exec 'dashboard_pids="$(ps -eo pid=,args= \
-    | awk -v p1="/venv/bin/hermes" -v p2=" dashboard" \
-      '"'"'index($0,p1) && index($0,p2) && !index($0,"--status") && !index($0,"--stop") { print $1 }'"'"')"
-    if [[ -n "$dashboard_pids" ]]; then
-      printf "%s\n" $dashboard_pids | xargs kill 2>/dev/null || true
-      echo "Hermes dashboard stopped in Docker."
-    else
-      echo "Hermes dashboard was not running in Docker."
-    fi
-    rm -f /opt/data/dashboard.pid'
+  if docker container inspect "${DOCKER_NAME}" >/dev/null 2>&1; then
+    docker stop "${DOCKER_NAME}" >/dev/null || true
+    echo "Docker Hermes gateway/dashboard stopped: ${DOCKER_NAME}"
+  else
+    echo "Docker container does not exist: ${DOCKER_NAME}"
+  fi
 }
 
 status_docker() {
-  docker_ensure
-  docker_exec 'dashboard_pid="$(ps -eo pid=,args= \
-    | awk -v p1="/venv/bin/hermes" -v p2=" dashboard" \
-      '"'"'index($0,p1) && index($0,p2) && !index($0,"--status") && !index($0,"--stop") { print $1; exit }'"'"')"
-    if [[ -n "$dashboard_pid" ]]; then
-      echo "dashboard=running pid=$dashboard_pid"
-    else
-      echo "dashboard=stopped"
-    fi'
+  command -v docker >/dev/null 2>&1 || die "docker CLI missing."
+  if ! docker container inspect "${DOCKER_NAME}" >/dev/null 2>&1; then
+    echo "dashboard=missing container=${DOCKER_NAME}"
+    echo "web=not-ready url=$(dashboard_url)"
+    return
+  fi
+  if [[ "$(docker inspect -f '{{.State.Running}}' "${DOCKER_NAME}" 2>/dev/null || true)" == "true" ]]; then
+    echo "dashboard=managed-by-container container=running"
+  else
+    echo "dashboard=managed-by-container container=stopped"
+  fi
   if curl -fsS --max-time 2 "$(dashboard_url)" >/dev/null 2>&1; then
     echo "web=ready url=$(dashboard_url)"
   else
@@ -327,7 +317,7 @@ status_docker() {
 
 logs_docker() {
   docker_ensure
-  docker_exec 'tail -160 /opt/data/logs/dashboard.log 2>/dev/null || echo "No dashboard log yet."'
+  docker logs --tail 160 "${DOCKER_NAME}" 2>&1 | sed -n '/^\[dashboard\]/p'
 }
 
 open_dashboard() {

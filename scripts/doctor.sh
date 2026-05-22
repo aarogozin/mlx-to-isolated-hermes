@@ -84,56 +84,6 @@ check_user_ssh_key() {
   fi
 }
 
-find_vmrun() {
-  if [[ -n "${VMRUN_PATH:-}" && -x "${VMRUN_PATH}" ]]; then
-    printf '%s\n' "${VMRUN_PATH}"
-    return 0
-  fi
-
-  local candidates=(
-    "/Applications/VMware Fusion.app/Contents/Public/vmrun"
-    "/Applications/VMware Fusion.app/Contents/Library/vmrun"
-  )
-
-  local candidate
-  for candidate in "${candidates[@]}"; do
-    if [[ -x "${candidate}" ]]; then
-      printf '%s\n' "${candidate}"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-check_vmware() {
-  if [[ -d "/Applications/VMware Fusion.app" ]]; then
-    pass "VMware Fusion app"
-  else
-    fail "VMware Fusion app missing"
-    return
-  fi
-
-  local vmrun_path
-  if vmrun_path="$(find_vmrun)"; then
-    pass "vmrun: ${vmrun_path}"
-  else
-    fail "vmrun missing"
-  fi
-
-  if [[ -x "/Applications/VMware Fusion.app/Contents/Library/vmcli" ]]; then
-    pass "vmcli"
-  else
-    fail "vmcli missing"
-  fi
-
-  if [[ -x "/Applications/VMware Fusion.app/Contents/Library/vmware-vdiskmanager" ]]; then
-    pass "vmware-vdiskmanager"
-  else
-    fail "vmware-vdiskmanager missing"
-  fi
-}
-
 check_multipass() {
   if command -v multipass >/dev/null 2>&1; then
     pass "multipass: $(command -v multipass)"
@@ -202,13 +152,6 @@ main() {
   check_command "git" git
   check_command "jq" jq
   check_command "yq" yq
-  if [[ "${VM_ENGINE:-multipass}" == "vmware" || "${VM_ENGINE:-multipass}" == "fusion" ]]; then
-    check_command "qemu-img" qemu-img
-  elif command -v qemu-img >/dev/null 2>&1; then
-    pass "qemu-img: $(command -v qemu-img)"
-  else
-    warn "qemu-img missing; only needed for VM_ENGINE=vmware"
-  fi
   check_command "uv" uv
   check_command "pipx" pipx
   check_command "node" node
@@ -218,26 +161,7 @@ main() {
   check_user_ssh_key
   check_model_dir
 
-  # Check only the active VM engine; skip (with a note) the inactive one.
-  local engine="${VM_ENGINE:-multipass}"
-  case "${engine}" in
-    multipass)
-      check_multipass
-      if [[ -d "/Applications/VMware Fusion.app" ]]; then
-        pass "VMware Fusion installed (inactive; set VM_ENGINE=vmware to use it)"
-      fi
-      ;;
-    vmware|fusion)
-      check_vmware
-      if command -v multipass >/dev/null 2>&1; then
-        pass "multipass installed (inactive; set VM_ENGINE=multipass to use it)"
-      fi
-      ;;
-    *)
-      fail "unknown VM_ENGINE=${engine}"
-      ;;
-  esac
-
+  check_multipass
   check_docker
   check_model_api
 

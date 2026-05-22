@@ -28,6 +28,9 @@ while IFS= read -r -d '' script; do
   bash -n "${script}"
 done < <(find scripts -type f -name '*.sh' -print0)
 
+log "Running shared-folder mock tests"
+"${SCRIPT_DIR}/test-shared-mounts-mock.sh"
+
 log "Checking release metadata"
 version_str="$(cat VERSION)"
 [[ "${version_str}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
@@ -61,16 +64,46 @@ make model-check
 if [[ "${SKIP_VM_E2E:-0}" != "1" ]]; then
   log "Running VM e2e smoke"
   multipass info "${VM_NAME:-omlx-agent-ubuntu}" >/dev/null 2>&1 || fail "Multipass VM missing. Run make vm-create before release-check."
-  make e2e-ready
+  "${SCRIPT_DIR}/e2e-ready.sh"
+  log "Checking Multipass shared folder"
+  "${SCRIPT_DIR}/shared-mounts-check.sh" multipass
 else
   echo "Skipping VM e2e because SKIP_VM_E2E=1"
 fi
 
 if [[ "${SKIP_DOCKER_E2E:-0}" != "1" ]]; then
   log "Running Docker preview e2e smoke"
-  make docker-e2e
+  "${SCRIPT_DIR}/docker-e2e.sh"
 else
   echo "Skipping Docker e2e because SKIP_DOCKER_E2E=1"
 fi
+
+log "Checking daemon control surfaces"
+if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
+  "${SCRIPT_DIR}/telegram-control.sh" doctor
+else
+  echo "Skipping telegram-doctor because TELEGRAM_BOT_TOKEN is not set"
+fi
+
+dashboard_target="${DASHBOARD_TARGET:-${SANDBOX_BACKEND:-vm}}"
+case "${dashboard_target}" in
+  docker)
+    if command -v docker >/dev/null 2>&1 && docker container inspect "${DOCKER_NAME:-omlx-agent-docker}" >/dev/null 2>&1; then
+      DASHBOARD_TARGET=docker "${SCRIPT_DIR}/dashboard-control.sh" status
+    else
+      echo "Skipping Docker dashboard status because container is missing"
+    fi
+    ;;
+  vm|multipass)
+    if multipass info "${VM_NAME:-omlx-agent-ubuntu}" >/dev/null 2>&1; then
+      DASHBOARD_TARGET=vm "${SCRIPT_DIR}/dashboard-control.sh" status
+    else
+      echo "Skipping VM dashboard status because VM is missing"
+    fi
+    ;;
+  *)
+    echo "Skipping dashboard status for unsupported target: ${dashboard_target}"
+    ;;
+esac
 
 log "Release check complete"

@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# scripts/agents-install.sh — Install Hermes inside the agent VM.
-#
-# Supports VM_ENGINE=multipass (default) and VM_ENGINE=vmware/fusion.
+# scripts/agents-install.sh — Install Hermes inside the Multipass agent VM.
 # Reads all configuration from .env.
 
 set -euo pipefail
@@ -20,7 +18,6 @@ fi
 # shellcheck source=vm-common.sh
 source "${SCRIPT_DIR}/vm-common.sh"
 
-VM_ENGINE="${VM_ENGINE:-multipass}"
 VM_NAME="${VM_NAME:-omlx-agent-ubuntu}"
 VM_SSH_USER="${VM_SSH_USER:-agent}"
 OPENAI_BASE_URL_GUEST="${OPENAI_BASE_URL_GUEST:-http://model-host.internal:8000/v1}"
@@ -35,6 +32,9 @@ TELEGRAM_GROUP_ALLOWED_USERS="${TELEGRAM_GROUP_ALLOWED_USERS:-}"
 TELEGRAM_GROUP_ALLOWED_CHATS="${TELEGRAM_GROUP_ALLOWED_CHATS:-}"
 GATEWAY_ALLOWED_USERS="${GATEWAY_ALLOWED_USERS:-}"
 GATEWAY_ALLOW_ALL_USERS="${GATEWAY_ALLOW_ALL_USERS:-false}"
+HERMES_INSTALL_TIMEOUT_SECONDS="${HERMES_INSTALL_TIMEOUT_SECONDS:-900}"
+HERMES_INSTALL_RETRIES="${HERMES_INSTALL_RETRIES:-3}"
+HERMES_REF="${HERMES_REF:-main}"
 
 if [[ -n "${TELEGRAM_USER_ID}" ]]; then
   TELEGRAM_ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS:-${TELEGRAM_USER_ID}}"
@@ -69,6 +69,9 @@ TELEGRAM_GROUP_ALLOWED_USERS="${TELEGRAM_GROUP_ALLOWED_USERS:-}"
 TELEGRAM_GROUP_ALLOWED_CHATS="${TELEGRAM_GROUP_ALLOWED_CHATS:-}"
 GATEWAY_ALLOWED_USERS="${GATEWAY_ALLOWED_USERS:-}"
 GATEWAY_ALLOW_ALL_USERS="${GATEWAY_ALLOW_ALL_USERS:-false}"
+HERMES_INSTALL_TIMEOUT_SECONDS="${HERMES_INSTALL_TIMEOUT_SECONDS:-900}"
+HERMES_INSTALL_RETRIES="${HERMES_INSTALL_RETRIES:-3}"
+HERMES_REF="${HERMES_REF:-main}"
 
 [[ -n "${OPENAI_API_KEY}" ]] || {
   echo "ERROR: OPENAI_API_KEY missing." >&2
@@ -90,6 +93,9 @@ if [[ "$(id -u)" -ne 0 ]]; then
     TELEGRAM_GROUP_ALLOWED_CHATS="${TELEGRAM_GROUP_ALLOWED_CHATS}" \
     GATEWAY_ALLOWED_USERS="${GATEWAY_ALLOWED_USERS}" \
     GATEWAY_ALLOW_ALL_USERS="${GATEWAY_ALLOW_ALL_USERS}" \
+    HERMES_INSTALL_TIMEOUT_SECONDS="${HERMES_INSTALL_TIMEOUT_SECONDS}" \
+    HERMES_INSTALL_RETRIES="${HERMES_INSTALL_RETRIES}" \
+    HERMES_REF="${HERMES_REF}" \
     bash "$0"
 fi
 
@@ -114,10 +120,104 @@ chown -R "${AGENT_USER}:${AGENT_USER}" \
   "/home/${AGENT_USER}/workspace" \
   "/home/${AGENT_USER}/.hermes"
 
-sudo -Hu "${AGENT_USER}" bash -lc \
-  'export PATH="$HOME/.local/bin:$PATH"; if ! command -v hermes >/dev/null 2>&1; then curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash; fi'
+sudo -Hu "${AGENT_USER}" env \
+  HOME="/home/${AGENT_USER}" \
+  USER="${AGENT_USER}" \
+  LOGNAME="${AGENT_USER}" \
+  HERMES_INSTALL_TIMEOUT_SECONDS="${HERMES_INSTALL_TIMEOUT_SECONDS}" \
+  HERMES_INSTALL_RETRIES="${HERMES_INSTALL_RETRIES}" \
+  HERMES_REF="${HERMES_REF}" \
+  bash -c '
+    set -euo pipefail
+    export PATH="$HOME/.local/bin:$PATH"
+    if command -v hermes >/dev/null 2>&1; then
+      exit 0
+    fi
 
-sudo -Hu "${AGENT_USER}" bash -lc \
+    install_dir="$HOME/.hermes/hermes-agent"
+    archive_url="https://github.com/NousResearch/hermes-agent/archive/refs/heads/${HERMES_REF}.tar.gz"
+    work_dir="$(mktemp -d)"
+    cleanup() {
+      rm -rf "$work_dir"
+    }
+    trap cleanup EXIT
+
+    for attempt in $(seq 1 "${HERMES_INSTALL_RETRIES}"); do
+      if [[ -d "$HOME/.hermes/hermes-agent" && ! -x "$HOME/.hermes/hermes-agent/venv/bin/hermes" ]]; then
+        rm -rf "$HOME/.hermes/hermes-agent"
+      fi
+
+      rm -rf "$work_dir/hermes-src" "$work_dir/hermes.tar.gz"
+      mkdir -p "$work_dir/hermes-src"
+
+      echo "Installing Hermes from GitHub archive (${HERMES_REF}), attempt ${attempt}/${HERMES_INSTALL_RETRIES}..."
+      if timeout "${HERMES_INSTALL_TIMEOUT_SECONDS}s" \
+        curl -L --fail --retry 5 --retry-delay 3 --connect-timeout 10 \
+          -o "$work_dir/hermes.tar.gz" "$archive_url" && \
+        tar -xzf "$work_dir/hermes.tar.gz" -C "$work_dir/hermes-src" --strip-components=1; then
+        rm -rf "$install_dir"
+        mkdir -p "$(dirname "$install_dir")"
+        mv "$work_dir/hermes-src" "$install_dir"
+        cd "$install_dir"
+
+        if ! command -v uv >/dev/null 2>&1; then
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          export PATH="$HOME/.local/bin:$PATH"
+        fi
+
+        export UV_NO_CONFIG=1
+        uv python install 3.11 >/dev/null
+        uv venv venv --python 3.11
+
+        if [[ -f uv.lock ]]; then
+          if ! UV_PROJECT_ENVIRONMENT="$install_dir/venv" uv sync --extra all --locked; then
+            echo "uv sync failed; falling back to editable install tiers..." >&2
+            if ! uv pip install --python "$install_dir/venv/bin/python" -e ".[all]"; then
+              uv pip install --python "$install_dir/venv/bin/python" -e "."
+            fi
+          fi
+        else
+          if ! uv pip install --python "$install_dir/venv/bin/python" -e ".[all]"; then
+            uv pip install --python "$install_dir/venv/bin/python" -e "."
+          fi
+        fi
+
+        if [[ ! -x "$install_dir/venv/bin/hermes" ]]; then
+          echo "Hermes entrypoint missing after install: $install_dir/venv/bin/hermes" >&2
+          exit 1
+        fi
+
+        mkdir -p "$HOME/.local/bin"
+        cat > "$HOME/.local/bin/hermes" <<EOF
+#!/usr/bin/env bash
+unset PYTHONPATH PYTHONHOME
+export HERMES_HOME="\${HERMES_HOME:-\$HOME/.hermes}"
+exec "$install_dir/venv/bin/hermes" "\$@"
+EOF
+        chmod +x "$HOME/.local/bin/hermes"
+
+        if [[ -f "$install_dir/tools/skills_sync.py" ]]; then
+          "$install_dir/venv/bin/python" "$install_dir/tools/skills_sync.py" || true
+        fi
+
+        exit 0
+      fi
+      if [[ "${attempt}" -lt "${HERMES_INSTALL_RETRIES}" ]]; then
+        echo "Hermes install failed on attempt ${attempt}/${HERMES_INSTALL_RETRIES}; retrying in 10s..." >&2
+        sleep 10
+      fi
+    done
+
+    echo "ERROR: Hermes install failed after ${HERMES_INSTALL_RETRIES} attempt(s)." >&2
+    echo "Retry later with ./scripts/agents-install.sh or increase HERMES_INSTALL_TIMEOUT_SECONDS." >&2
+    exit 1
+  '
+
+sudo -Hu "${AGENT_USER}" env \
+  HOME="/home/${AGENT_USER}" \
+  USER="${AGENT_USER}" \
+  LOGNAME="${AGENT_USER}" \
+  bash -c \
   'cd "$HOME"; python_bin="$HOME/.hermes/hermes-agent/venv/bin/python"; if [[ -x "$python_bin" ]] && ! "$python_bin" -c "import telegram" >/dev/null 2>&1; then if command -v uv >/dev/null 2>&1; then uv pip install --python "$python_bin" "python-telegram-bot>=21,<23"; else "$python_bin" -m ensurepip --upgrade >/dev/null 2>&1 || true; "$python_bin" -m pip install --upgrade "python-telegram-bot>=21,<23"; fi; fi'
 
 detected_model="${MODEL_NAME}"
@@ -138,7 +238,9 @@ ENVEOF
 append_env_if_set() {
   local key="$1"
   local value="$2"
-  [[ -n "${value}" ]] && printf '%s=%s\n' "${key}" "${value}" >> "/home/${AGENT_USER}/.hermes/.env"
+  if [[ -n "${value}" ]]; then
+    printf '%s=%s\n' "${key}" "${value}" >> "/home/${AGENT_USER}/.hermes/.env"
+  fi
 }
 
 append_env_if_set TELEGRAM_BOT_TOKEN "${TELEGRAM_BOT_TOKEN}"
@@ -187,7 +289,11 @@ chown -R "${AGENT_USER}:${AGENT_USER}" \
   "/home/${AGENT_USER}/.profile.d-local-ai" \
   "/home/${AGENT_USER}/.profile"
 
-sudo -Hu "${AGENT_USER}" bash -lc \
+sudo -Hu "${AGENT_USER}" env \
+  HOME="/home/${AGENT_USER}" \
+  USER="${AGENT_USER}" \
+  LOGNAME="${AGENT_USER}" \
+  bash -c \
   'export PATH="$HOME/.local/bin:$PATH"; command -v hermes && hermes --help >/dev/null'
 INSTALLER
 
@@ -206,14 +312,10 @@ INSTALLER
     TELEGRAM_GROUP_ALLOWED_CHATS="${TELEGRAM_GROUP_ALLOWED_CHATS}" \
     GATEWAY_ALLOWED_USERS="${GATEWAY_ALLOWED_USERS}" \
     GATEWAY_ALLOW_ALL_USERS="${GATEWAY_ALLOW_ALL_USERS}" \
+    HERMES_INSTALL_TIMEOUT_SECONDS="${HERMES_INSTALL_TIMEOUT_SECONDS}" \
+    HERMES_INSTALL_RETRIES="${HERMES_INSTALL_RETRIES}" \
+    HERMES_REF="${HERMES_REF}" \
     -- "bash /tmp/install-agents.sh"
 }
 
-case "${VM_ENGINE}" in
-  multipass|vmware|fusion)
-    install_vm
-    ;;
-  *)
-    die "Unsupported VM_ENGINE=${VM_ENGINE}. Use multipass or vmware."
-    ;;
-esac
+install_vm

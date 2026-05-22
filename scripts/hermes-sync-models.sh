@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 # scripts/hermes-sync-models.sh — Sync oMLX model catalog into the Hermes agent VM.
-#
-# Supports VM_ENGINE=multipass (default) and VM_ENGINE=vmware/fusion.
 # Downloads the model list from the running oMLX API, merges it with the
 # LM Studio catalog, and writes the Hermes config.yaml + .env inside the VM.
 

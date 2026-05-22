@@ -328,16 +328,15 @@ configure_project_env() {
   fi
 
   set_env_value MODEL_BACKEND "omlx"
+  set_env_value AGENT_RUNTIME "hermes"
+  set_env_value SANDBOX_BACKEND "multipass"
   set_env_value MODEL_DIR "${model_dir}"
   set_env_value OMLX_PORT "8000"
   set_env_value LMSTUDIO_PORT "1234"
   set_env_value MODEL_BIND_HOST "0.0.0.0"
   set_env_value OPENAI_BASE_URL "http://localhost:8000/v1"
   set_env_value ANTHROPIC_BASE_URL "http://localhost:8000"
-  set_env_value VM_ENGINE "multipass"
   set_env_value VM_NAME "omlx-agent-ubuntu"
-  set_env_value VM_DIR "${HOME}/Virtual Machines.localized"
-  set_env_value VMX_PATH "${HOME}/Virtual Machines.localized/omlx-agent-ubuntu.vmwarevm/omlx-agent-ubuntu.vmx"
   set_env_value VM_CPUS "4"
   set_env_value VM_MEMORY_MB "8192"
   set_env_value VM_MEMORY "8G"
@@ -348,57 +347,22 @@ configure_project_env() {
   set_env_value USER_SSH_PUBLIC_KEY "${HOME}/.ssh/id_ed25519.pub"
   set_env_value VM_SNAPSHOT_NAME "clean-agent-base"
   set_env_value UBUNTU_MULTIPASS_IMAGE "24.04"
-  set_env_value UBUNTU_CLOUD_IMAGE_URL "https://cloud-images.ubuntu.com/releases/resolute/release/ubuntu-26.04-server-cloudimg-arm64.img"
-  set_env_value UBUNTU_CLOUD_IMAGE_SHA256SUMS_URL "https://cloud-images.ubuntu.com/releases/resolute/release/SHA256SUMS"
   set_env_value DOCKER_NAME "omlx-agent-docker"
-  set_env_value DOCKER_IMAGE "omlx-agent-hermes:0.1.0"
+  set_env_value HERMES_IMAGE "nousresearch/hermes-agent:latest"
   set_env_value DOCKER_DATA_VOLUME "omlx-agent-docker-data"
   set_env_value DOCKER_WORKSPACE_VOLUME "omlx-agent-docker-workspace"
   set_env_value DOCKER_CPUS "2"
   set_env_value DOCKER_MEMORY "4g"
   set_env_value DOCKER_SHM_SIZE "1g"
+  set_env_value DOCKER_DASHBOARD_PORT "9120"
+  set_env_value HERMES_GATEWAY_API_PORT "8642"
+  set_env_value DOCKER_GATEWAY_API_PORT "8642"
   set_env_value OPENAI_BASE_URL_DOCKER "http://host.docker.internal:8000/v1"
   set_env_value ANTHROPIC_BASE_URL_DOCKER "http://host.docker.internal:8000"
+  set_env_value OPENCLAW_IMAGE "ghcr.io/openclaw/openclaw:latest"
+  set_env_value OPENCLAW_CONTROL_PORT "18789"
 
   printf 'ok model dir: %s\n' "${model_dir}"
-}
-
-find_vmrun() {
-  local candidates=(
-    "/Applications/VMware Fusion.app/Contents/Public/vmrun"
-    "/Applications/VMware Fusion.app/Contents/Library/vmrun"
-  )
-
-  local candidate
-  for candidate in "${candidates[@]}"; do
-    if [[ -x "${candidate}" ]]; then
-      printf '%s\n' "${candidate}"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-verify_vmware_fusion() {
-  log "Verifying VMware Fusion"
-
-  if [[ ! -d "/Applications/VMware Fusion.app" ]]; then
-    if [[ "${VM_ENGINE:-multipass}" == "vmware" || "${VM_ENGINE:-multipass}" == "fusion" ]]; then
-      die "VMware Fusion is missing. Install VMware Fusion manually from Broadcom/VMware, launch it once, then rerun make bootstrap. Homebrew cannot install it because the cask requires authenticated Broadcom downloads."
-    fi
-    warn "VMware Fusion is missing; skipping because VM_ENGINE defaults to Multipass. Install Fusion manually only if you want the VMware fallback."
-    return
-  fi
-
-  local vmrun_path
-  if ! vmrun_path="$(find_vmrun)"; then
-    die "VMware Fusion is installed, but vmrun was not found in the expected app bundle paths."
-  fi
-
-  set_env_value VMRUN_PATH "${vmrun_path}"
-  "${vmrun_path}" >/dev/null || true
-  printf 'ok vmrun: %s\n' "${vmrun_path}"
 }
 
 verify_omlx() {
@@ -432,7 +396,7 @@ Next:
   make doctor
   make models-search       # wraps: lms get --mlx
   make models-list         # wraps: lms ls --json
-  make model-start-omlx    # serves LM Studio model dir with oMLX
+  make model-start-bg      # serves LM Studio model dir with oMLX
 
 Project env:
   ${ENV_FILE}
@@ -447,7 +411,6 @@ main() {
   ensure_lmstudio_path
   verify_lms
   configure_project_env
-  verify_vmware_fusion
   verify_omlx
   verify_docker
   print_next_steps

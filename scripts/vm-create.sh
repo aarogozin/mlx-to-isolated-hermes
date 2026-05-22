@@ -12,18 +12,4 @@ if [[ -f "${ENV_FILE}" ]]; then
   set +a
 fi
 
-VM_ENGINE="${VM_ENGINE:-multipass}"
-
-case "${VM_ENGINE}" in
-  multipass)
-    exec "${SCRIPT_DIR}/vm-create-multipass.sh"
-    ;;
-  vmware|fusion)
-    exec "${SCRIPT_DIR}/vm-create-ubuntu.sh"
-    ;;
-  *)
-    printf 'ERROR: unsupported VM_ENGINE=%s. Use multipass or vmware.\n' "${VM_ENGINE}" >&2
-    exit 2
-    ;;
-esac
-
+exec "${SCRIPT_DIR}/vm-create-multipass.sh"

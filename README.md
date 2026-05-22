@@ -4,27 +4,24 @@ Apple Silicon local-agent stack:
 
 - LM Studio finds and downloads MLX models.
 - oMLX serves those models on the macOS host through an OpenAI-compatible API.
-- Hermes runs in an isolated sandbox and connects back to the host model server.
+- Hermes runs in an isolated Multipass VM or Docker container and connects back to the host model server.
 
-Version: `0.1.0`
+Version: `0.2.0`
 
 ## Quickstart
 
 ```bash
 make bootstrap
-make models-search
-make models-list
-make vm-create
-make e2e-ready
-make vm-ssh
-hermes
+make setup
+make agent-status
+make agent-open-dashboard
 ```
 
 If LM Studio was just installed, launch it once before rerunning `make bootstrap`; this initializes the `lms` CLI.
 
 ## Architecture
 
-The stable 0.1.0 path is:
+Inference stays on macOS. The sandbox runs tools, package installs, documents, notes, browser tooling, and agent workflows.
 
 ```text
 macOS host
@@ -33,16 +30,12 @@ macOS host
 
 Multipass Ubuntu 24.04 ARM64 VM
   Hermes    -> http://model-host.internal:8000/v1
-```
 
-Docker preview uses the same host oMLX server:
-
-```text
 Docker Desktop container
   Hermes    -> http://host.docker.internal:8000/v1
 ```
 
-Inference stays on macOS. The VM/container runs tools, package installs, documents, notes, browsers, and agent workflows.
+Hermes is fully supported. OpenClaw is recognized as a planned adapter stub and does not run end-to-end yet.
 
 ## Bootstrap
 
@@ -51,60 +44,35 @@ make bootstrap
 make doctor
 ```
 
-Bootstrap installs or verifies:
-
-- Homebrew
-- LM Studio and `lms`
-- oMLX
-- Docker Desktop
-- Multipass
-- core CLI tools: `git`, `jq`, `yq`, `curl`, `wget`, `coreutils`, `uv`, `pipx`, `node@24`, `pnpm`
-
-The script creates `.env` from `.env.example` and generates a local API key for oMLX auth. `.env` is ignored by git.
-
-VMware Fusion remains a manual fallback path. It is not required for the default Multipass flow.
+Bootstrap installs or verifies Homebrew, LM Studio/`lms`, oMLX, Docker Desktop, Multipass, and core CLI tools. It creates `.env` from `.env.example` and generates a local API key for oMLX auth. `.env` is ignored by git.
 
 ## Models
 
 ```bash
-make models-search       # opens LM Studio model search for MLX models
-make models-list         # prints downloaded LM Studio models
-make models-sync         # symlinks compatible MLX safetensors models for oMLX
-make model-select        # choose the default local model for Hermes/oMLX
-make model-start-bg      # starts persistent launchd-backed oMLX
-make model-stop-bg       # stops the launchd-backed oMLX service
-make model-check         # verifies /v1/models with Bearer auth
+make models-search
+make models-list
+make models-sync
+make model-select
+make model-start-bg
+make model-stop-bg
+make model-check
 ```
 
 `make models-sync` reads the LM Studio catalog, symlinks compatible MLX safetensors LLMs into `.runtime/omlx-models`, and writes `MODEL_DIR`/`MODEL_NAME` into `.env`.
 
-Choose a model interactively:
+The selected model becomes Hermes' default. All models served by oMLX are also written into Hermes as the `local-omlx` provider so they are available in Hermes model selection and Dashboard flows where supported.
 
-```bash
-make model-select
-```
-
-Or non-interactively:
-
-```bash
-MODEL=qwen3.6-27b-ud-mlx make model-select
-```
-
-The selected model becomes Hermes' default, while all models served by oMLX are written into Hermes as the `local-omlx` provider so they show up in `hermes model` and Dashboard model selection.
-
-## Stable VM Sandbox
+## Multipass VM
 
 ```bash
 make vm-create
-make e2e-ready
+make agent-start
 make vm-ssh
-hermes
 ```
-
-The VM is Ubuntu Server 24.04 LTS ARM64 through Multipass. Ubuntu 24.04 is the default because Hermes browser tooling currently works there on arm64; newer Ubuntu images may break Playwright support.
 
 Defaults:
 
+- Ubuntu Server 24.04 LTS ARM64
 - `VM_CPUS=4`
 - `VM_MEMORY=8G`
 - `VM_DISK=80G`
@@ -119,50 +87,63 @@ make vm-stop
 make vm-snapshot
 make vm-start
 make vm-reset
+make vm-destroy
 ```
 
 Multipass can only snapshot stopped instances, so the release workflow is stop -> snapshot -> start.
 
-If `OBSIDIAN_SHARED_PATH` is set, the VM mounts that folder at `/mnt/obsidian`.
+## Shared Folder
 
-## Docker Preview
-
-Docker support is a preview backend in 0.1.0. It runs Hermes in a custom image based on the official Hermes Agent Docker image and connects to host oMLX through Docker Desktop networking.
+If `OBSIDIAN_SHARED_PATH` is set, Multipass syncs that folder to `OBSIDIAN_GUEST_PATH` (`/mnt/obsidian` by default). The default `MULTIPASS_SHARED_MODE=transfer` copies a snapshot and avoids brittle SSHFS behavior.
 
 ```bash
-make docker-build
-make docker-create
-make docker-start
-make docker-shell
+make shared-mounts-sync
+make shared-mounts-status
+make shared-mounts-check
 ```
 
-Inside the container:
+`shared-mounts-check` writes a temporary marker on the host, syncs the folder, verifies identical content inside the sandbox, and cleans up. Docker uses a live bind mount and also verifies write-back from the container.
+
+Agent startup treats the shared folder as optional by default (`SHARED_MOUNTS_REQUIRED=0`). Set `SHARED_MOUNTS_REQUIRED=1` when startup should fail unless the folder is available.
+
+## Agent Commands
+
+Use these when you do not want to think about whether the active sandbox is Docker or Multipass:
 
 ```bash
-hermes
+make agent-start
+make agent-stop
+make agent-restart
+make agent-status
+make agent-logs
+make agent-shell
+make agent-open-dashboard
 ```
 
-End-to-end Docker smoke:
+The commands read `AGENT_RUNTIME` and `SANDBOX_BACKEND` from `.env`. When Telegram is configured, `make agent-start` stops the previous backend gateway before starting the selected one, so switching between Docker and Multipass does not leave two Telegram polling sessions fighting for the same bot token.
+
+## Docker Sandbox
+
+Docker uses the official `nousresearch/hermes-agent:latest` image and connects to host oMLX through Docker Desktop networking. This repository does not build or publish a custom Docker image.
 
 ```bash
-make docker-e2e
+SANDBOX_BACKEND=docker make agent-start
+SANDBOX_BACKEND=docker make agent-status
+SANDBOX_BACKEND=docker make agent-shell
 ```
 
-Reset Docker preview state:
-
-```bash
-make docker-stop
-make docker-reset
-DOCKER_RESET_DATA=1 make docker-reset   # also removes Hermes data/workspace volumes
-```
-
-Docker uses named volumes:
-
-- `/opt/data` for Hermes config/state
-- `/home/agent/workspace` for agent workspace
-- optional `/mnt/obsidian` if `OBSIDIAN_SHARED_PATH` is set
+Docker uses named volumes for `/opt/data` and `/opt/data/workspace`. If `OBSIDIAN_SHARED_PATH` is set, it is bind-mounted to `OBSIDIAN_GUEST_PATH`.
 
 Do not install GUI Obsidian in Docker. Mount an Obsidian vault as files and let Hermes skills/tools work with the notes directly. Telegram, Discord, and similar integrations should be configured through Hermes gateway tokens and skills rather than desktop apps.
+
+## Clean Sandbox Reset
+
+```bash
+make clean-all
+FORCE=1 make clean-all
+```
+
+`clean-all` stops oMLX, Telegram gateways, dashboards, Docker, and Multipass; then deletes Docker sandbox volumes and the Multipass VM. It preserves `.env`, API keys, Telegram credentials, host dependencies, and LM Studio model files.
 
 ## Telegram Gateway
 
@@ -170,122 +151,36 @@ Create a Telegram bot with `@BotFather`, then put the token in `.env`:
 
 ```bash
 TELEGRAM_BOT_TOKEN=...
-```
-
-Recommended for immediate access without pairing:
-
-```bash
 TELEGRAM_USER_ID=123456789
 TELEGRAM_ALLOWED_USERS=123456789
 ```
 
-Get your numeric Telegram user ID from `@userinfobot`. `TELEGRAM_USER_ID` is a local convenience shortcut; the scripts map it into the Hermes allowlist when `TELEGRAM_ALLOWED_USERS` and `GATEWAY_ALLOWED_USERS` are empty. If no allowlist is set, Hermes will require pairing: send a message to the bot, list pending requests, then approve the code.
+Get your numeric Telegram user ID from `@userinfobot`. `TELEGRAM_USER_ID` is a local convenience shortcut; scripts map it into Hermes allowlists when `TELEGRAM_ALLOWED_USERS` and `GATEWAY_ALLOWED_USERS` are empty.
 
-VM target, the default:
-
-```bash
-make telegram-start
-make telegram-status
-make telegram-pairing
-CODE=<pairing-code> make telegram-approve
-make telegram-logs
-make telegram-doctor
-```
-
-Docker preview target:
+Start the active backend daemon:
 
 ```bash
-TELEGRAM_TARGET=docker make telegram-start
-TELEGRAM_TARGET=docker make telegram-status
+make agent-start
+make agent-logs
 ```
 
-Supported `.env` knobs:
+## Dashboard Access
 
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_USER_ID`
-- `TELEGRAM_ALLOWED_USERS`
-- `TELEGRAM_GROUP_ALLOWED_USERS`
-- `TELEGRAM_GROUP_ALLOWED_CHATS`
-- `GATEWAY_ALLOWED_USERS`
-- `GATEWAY_ALLOW_ALL_USERS=false`
-- `TELEGRAM_TARGET=vm`
-
-Telegram Bot API polling allows only one active gateway per bot token. If you see `Conflict: terminated by other getUpdates request`, run:
+Local dashboard:
 
 ```bash
-make telegram-doctor
-make telegram-stop-host
-make telegram-restart
+make agent-open-dashboard
 ```
 
-## Hermes Dashboard
+Public internet access should be opt-in through Tailscale Serve or Cloudflare Tunnel + Access. Do not expose the dashboard by raw public port forwarding.
 
-Hermes Dashboard runs inside the sandbox. The default VM path exposes it only on your Mac through a local SSH tunnel:
-
-```bash
-make dashboard-start
-make dashboard-status
-make dashboard-open
-```
-
-Default URL:
-
-```text
-http://127.0.0.1:9119
-```
-
-Stop it with:
-
-```bash
-make dashboard-stop
-```
-
-Docker preview is available with:
-
-```bash
-DASHBOARD_TARGET=docker make dashboard-start
-```
-
-Dashboard knobs:
-
-- `DASHBOARD_TARGET=vm`
-- `HERMES_DASHBOARD_PORT=9119`
-- `HERMES_DASHBOARD_TUI=1`
-
-Remote access:
-
-- Use Tailscale Serve for private HTTPS access from your own devices.
-- Use Cloudflare Tunnel plus Cloudflare Access for a public HTTPS hostname.
-- Avoid exposing Dashboard directly with a plain reverse proxy unless you have a separate authentication layer.
-
-Commands:
-
-```bash
-make dashboard-tailscale-start
-make dashboard-cloudflare-start
-```
-
-See [Remote Dashboard Access](docs/REMOTE_ACCESS.md).
+See [docs/REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md).
 
 ## Release Check
 
 ```bash
 make release-check
-```
-
-This runs shell syntax checks, release metadata checks, secret/runtime scans, host doctor, model API check, VM e2e smoke, and Docker e2e smoke.
-
-To skip expensive smoke tests during local iteration:
-
-```bash
 SKIP_VM_E2E=1 SKIP_DOCKER_E2E=1 make release-check
 ```
 
-## Security Notes
-
-- oMLX binds to `0.0.0.0` so VM/Docker sandboxes can reach it.
-- Bearer auth is required; bootstrap generates the key into `.env`.
-- `.env`, `.runtime/`, `.vm/`, logs, and local caches are ignored by git.
-- Telegram tokens and user IDs stay in `.env`; do not copy them into tracked docs or scripts.
-- Hermes Dashboard defaults to `127.0.0.1` access. Do not bind it to a public interface because it can expose agent configuration and API keys.
-- Treat mounted notes and documents as sensitive. For untrusted agents, prefer a copied/synced knowledge snapshot over a live writable mount.
+Release check runs shell syntax, mocked shared-folder tests, host doctor/model API checks, VM e2e, real shared-folder smoke, Docker e2e, and daemon status checks.

@@ -7,7 +7,7 @@
 #
 # Guides you through:
 #   1. Detecting installed tools
-#   2. Choosing a sandbox backend (Multipass VM / VMware Fusion VM / Docker)
+#   2. Choosing an agent runtime and sandbox backend (Hermes / Multipass or Docker)
 #   3. Configuring credentials (.env)
 #   4. Selecting a local LLM model
 #   5. Deploying the full stack (oMLX + Hermes + Dashboard + Telegram)
@@ -65,18 +65,19 @@ prompt_secret() {
 }
 
 # Numbered menu.  Returns 0-based index of the chosen option.
+# All UI output goes to stderr so $(choose_menu ...) captures only the result.
 choose_menu() {
   local title="$1"; shift
   local -a options=("$@")
   local i
-  printf "\n  ${BOLD}%s${RESET}\n" "${title}"
+  printf "\n  ${BOLD}%s${RESET}\n" "${title}" >&2
   for i in "${!options[@]}"; do
-    printf "    ${CYAN}%d)${RESET}  %s\n" "$((i + 1))" "${options[$i]}"
+    printf "    ${CYAN}%d)${RESET}  %s\n" "$((i + 1))" "${options[$i]}" >&2
   done
   local choice
   while true; do
-    printf "${BOLD}  →  Select [1-%d]: ${RESET}" "${#options[@]}"
-    read -r choice
+    printf "${BOLD}  →  Select [1-%d]: ${RESET}" "${#options[@]}" >&2
+    read -r choice </dev/tty
     if [[ "${choice}" =~ ^[0-9]+$ ]] && \
        [[ "${choice}" -ge 1 ]] && \
        [[ "${choice}" -le "${#options[@]}" ]]; then
@@ -126,7 +127,7 @@ BANNER
 
 # ── Step 1: Detect current state ──────────────────────────────────────────────
 HAVE_BREW=0; HAVE_LMS=0; HAVE_OMLX=0
-HAVE_MULTIPASS=0; HAVE_VMWARE=0; HAVE_DOCKER=0
+HAVE_MULTIPASS=0; HAVE_DOCKER=0
 OMLX_RUNNING=0
 
 detect_state() {
@@ -146,9 +147,6 @@ detect_state() {
 
   command -v multipass >/dev/null 2>&1 \
     && { HAVE_MULTIPASS=1; ok "Multipass"; } || true
-
-  [[ -d "/Applications/VMware Fusion.app" ]] \
-    && { HAVE_VMWARE=1; ok  "VMware Fusion"; } || true
 
   { command -v docker >/dev/null 2>&1 && docker version >/dev/null 2>&1; } \
     && { HAVE_DOCKER=1; ok  "Docker Desktop"; } || true
@@ -182,8 +180,42 @@ run_bootstrap_if_needed() {
   HAVE_BREW=1; HAVE_OMLX=1
 }
 
-# ── Step 3: Choose backend ────────────────────────────────────────────────────
+# ── Step 3: Choose runtime and backend ────────────────────────────────────────
+AGENT_RUNTIME=""
 BACKEND=""
+
+choose_runtime() {
+  step "Choose agent runtime"
+  printf "  ${DIM}Hermes is fully supported now. OpenClaw wiring is prepared as a stub.${RESET}\n"
+
+  local idx
+  idx="$(choose_menu "Which agent runtime do you want?" \
+    "Hermes      — supported" \
+    "OpenClaw    — planned adapter stub")"
+
+  ensure_env_file
+  case "${idx}" in
+    0)
+      AGENT_RUNTIME="hermes"
+      env_put AGENT_RUNTIME "hermes"
+      ok "Agent runtime: Hermes"
+      ;;
+    1)
+      AGENT_RUNTIME="openclaw"
+      env_put AGENT_RUNTIME "openclaw"
+      warn "OpenClaw support is prepared but not implemented end-to-end yet."
+      cat <<'EOF'
+  Next implementation step:
+    AGENT_RUNTIME=openclaw make agent-status
+
+  References:
+    https://docs.openclaw.ai/install/docker
+    https://docs.openclaw.ai/channels/telegram
+EOF
+      exit 0
+      ;;
+  esac
+}
 
 choose_backend() {
   step "Choose sandbox backend"
@@ -201,15 +233,10 @@ choose_backend() {
   fi
   keys+=("multipass")
 
-  if [[ "${HAVE_VMWARE}" -eq 1 ]]; then
-    options+=("VMware Fusion VM — Ubuntu 26.04 ARM64")
-    keys+=("vmware")
-  fi
-
   if [[ "${HAVE_DOCKER}" -eq 1 ]]; then
-    options+=("Docker           — preview mode (no Playwright)")
+    options+=("Docker           — official Hermes image, daemon-friendly")
   else
-    options+=("Docker           — preview mode  ✦ Docker Desktop not running")
+    options+=("Docker           — official Hermes image  ✦ Docker Desktop not running")
   fi
   keys+=("docker")
 
@@ -220,9 +247,14 @@ choose_backend() {
   ensure_env_file
 
   case "${BACKEND}" in
-    multipass) env_put VM_ENGINE multipass; ok "Backend: Multipass VM" ;;
-    vmware)    env_put VM_ENGINE vmware;    ok "Backend: VMware Fusion VM" ;;
-    docker)                                 ok "Backend: Docker" ;;
+    multipass)
+      env_put SANDBOX_BACKEND multipass
+      ok "Backend: Multipass VM"
+      ;;
+    docker)
+      env_put SANDBOX_BACKEND docker
+      ok "Backend: Docker"
+      ;;
   esac
 }
 
@@ -362,26 +394,8 @@ create_sandbox() {
       "${SCRIPT_DIR}/hermes-sync-models.sh"
       ;;
 
-    vmware)
-      step "Setting up VMware Fusion VM"
-      local vmx_path
-      vmx_path="$(env_get VMX_PATH)"
-      if [[ -n "${vmx_path}" && -f "${vmx_path}" ]]; then
-        info "VM already exists: ${vmx_path}"
-      else
-        substep "Creating VM (downloads Ubuntu cloud image — may take a while)..."
-        "${SCRIPT_DIR}/vm-create.sh"
-      fi
-      substep "Installing Hermes in VM..."
-      "${SCRIPT_DIR}/agents-install.sh"
-      substep "Syncing model catalog to Hermes..."
-      "${SCRIPT_DIR}/hermes-sync-models.sh"
-      ;;
-
     docker)
       step "Setting up Docker container"
-      substep "Building Docker image (first time is slow)..."
-      "${SCRIPT_DIR}/docker-build.sh"
       substep "Creating container..."
       "${SCRIPT_DIR}/docker-create.sh"
       substep "Starting container..."
@@ -397,7 +411,11 @@ DASHBOARD_URL=""
 start_dashboard() {
   step "Starting Hermes Dashboard"
   local port
-  port="$(env_get HERMES_DASHBOARD_PORT)"; port="${port:-9119}"
+  if [[ "${BACKEND}" == "docker" ]]; then
+    port="$(env_get DOCKER_DASHBOARD_PORT)"; port="${port:-9120}"
+  else
+    port="$(env_get HERMES_DASHBOARD_PORT)"; port="${port:-9119}"
+  fi
 
   if [[ "${BACKEND}" == "docker" ]]; then
     DASHBOARD_TARGET=docker "${SCRIPT_DIR}/dashboard-control.sh" start
@@ -486,39 +504,35 @@ DONE
       if [[ -n "${tg_uid}" ]]; then
         printf "  ${DIM}   Auto-approved for Telegram user ID: %s${RESET}\n" "${tg_uid}"
       else
-        printf "  ${DIM}   To approve access: ${BOLD}make telegram-pairing${RESET}${DIM} then ${BOLD}CODE=<code> make telegram-approve${RESET}\n"
+        printf "  ${DIM}   To approve access: ${BOLD}./scripts/telegram-control.sh pairing${RESET}${DIM} then ${BOLD}CODE=<code> ./scripts/telegram-control.sh approve${RESET}\n"
       fi
     else
       printf "  ${YELLOW}⚠  Telegram bot token set but could not verify (check internet / token)${RESET}\n"
     fi
   else
     printf "  ${DIM}   Telegram not configured. Add TELEGRAM_BOT_TOKEN to .env and run:${RESET}\n"
-    printf "  ${DIM}   ${BOLD}make telegram-start${RESET}\n"
+    printf "  ${DIM}   ${BOLD}make agent-start${RESET}\n"
   fi
 
   printf "\n"
 
   # ── Quick commands ──
   printf "  ${BOLD}Useful commands:${RESET}\n"
-  printf "  ${DIM}  make dashboard-open       ${RESET}# open Dashboard in browser\n"
+  printf "  ${DIM}  make agent-open-dashboard ${RESET}# open Dashboard in browser\n"
   printf "  ${DIM}  make doctor               ${RESET}# full system health check\n"
   printf "  ${DIM}  make model-select         ${RESET}# switch local model\n"
   if [[ "${BACKEND}" != "docker" ]]; then
     printf "  ${DIM}  make vm-ssh               ${RESET}# SSH into the agent VM\n"
     printf "  ${DIM}  make vm-status            ${RESET}# show VM status and IP\n"
   else
-    printf "  ${DIM}  make docker-shell         ${RESET}# shell into the Docker agent\n"
+    printf "  ${DIM}  make agent-shell          ${RESET}# shell into the Docker agent\n"
   fi
-  [[ -n "${tg_token}" ]] && printf "  ${DIM}  make telegram-status      ${RESET}# check gateway status\n"
+  [[ -n "${tg_token}" ]] && printf "  ${DIM}  make agent-status         ${RESET}# check gateway status\n"
   printf "\n"
 
-  # ── Offer to open browser ──
+  # ── Auto-open dashboard in browser ──
   if command -v open >/dev/null 2>&1; then
-    local answer
-    answer="$(prompt "Open Dashboard in browser now?" "y")"
-    if [[ "${answer,,}" == "y" || "${answer,,}" == "yes" ]]; then
-      open "${DASHBOARD_URL}"
-    fi
+    open "${DASHBOARD_URL}"
   fi
 }
 
@@ -531,6 +545,7 @@ main() {
   print_banner
   detect_state
   run_bootstrap_if_needed
+  choose_runtime
   choose_backend
   configure_credentials
   configure_model

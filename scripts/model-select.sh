@@ -6,6 +6,8 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${PROJECT_ROOT}/.env"
 CATALOG="${PROJECT_ROOT}/.runtime/lmstudio-models.json"
 
+OVERRIDE_SANDBOX_BACKEND="${SANDBOX_BACKEND:-}"
+
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -68,9 +70,22 @@ MODEL="${selected}" "${SCRIPT_DIR}/models-sync-omlx.sh"
 
 echo
 echo "==> Syncing Hermes model catalog"
-if ! "${SCRIPT_DIR}/hermes-sync-models.sh"; then
-  echo "warn Hermes sync failed. Run make e2e-ready after VM/Docker are ready." >&2
-fi
+case "${OVERRIDE_SANDBOX_BACKEND:-${SANDBOX_BACKEND:-multipass}}" in
+  docker)
+    if command -v docker >/dev/null 2>&1; then
+      if ! "${SCRIPT_DIR}/docker-create.sh"; then
+        echo "warn Docker Hermes sync failed. Run ./scripts/docker-create.sh after Docker is ready." >&2
+      fi
+    else
+      echo "warn Docker CLI missing; skipped Docker Hermes sync." >&2
+    fi
+    ;;
+  *)
+    if ! "${SCRIPT_DIR}/hermes-sync-models.sh"; then
+      echo "warn Hermes sync failed. Run ./scripts/e2e-ready.sh after VM/Docker are ready." >&2
+    fi
+    ;;
+esac
 
 echo
 echo "Selected local model: ${selected}"

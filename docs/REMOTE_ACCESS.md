@@ -7,15 +7,15 @@ Hermes Dashboard can expose agent configuration, API keys, and session state. Ke
 Use Tailscale Serve when the dashboard only needs to be reachable by your own devices. It gives a valid HTTPS URL inside your tailnet and keeps Tailscale ACLs in front of the dashboard.
 
 ```bash
-make dashboard-start
-make dashboard-tailscale-start
-make dashboard-tailscale-status
+make agent-start
+./scripts/dashboard-remote.sh tailscale-start
+./scripts/dashboard-remote.sh tailscale-status
 ```
 
 Stop serving it with:
 
 ```bash
-make dashboard-tailscale-stop
+./scripts/dashboard-remote.sh tailscale-stop
 ```
 
 This is the safest default remote mode because it is not public internet exposure.
@@ -51,13 +51,13 @@ CLOUDFLARE_TUNNEL_TOKEN=...
 Run:
 
 ```bash
-make dashboard-cloudflare-start
+./scripts/dashboard-remote.sh cloudflare-start
 ```
 
 Stop:
 
 ```bash
-make dashboard-cloudflare-stop
+./scripts/dashboard-remote.sh cloudflare-stop
 ```
 
 Do not run a Cloudflare public hostname without Access. The dashboard is an internal control surface, not a public app.

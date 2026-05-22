@@ -2,8 +2,7 @@
 # scripts/e2e-ready.sh — Full end-to-end provisioning smoke-test.
 #
 # Syncs models, starts oMLX, installs Hermes in the VM, and verifies
-# that the guest can reach the model API. Supports VM_ENGINE=multipass
-# and VM_ENGINE=vmware/fusion via vm-common.sh.
+# that the guest can reach the model API through Multipass.
 
 set -euo pipefail
 

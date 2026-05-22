@@ -1,167 +1,83 @@
-# Quick Test Guide — mlx-to-isolated-hermes
+# Quick Test Guide — omlx_to_client
 
-Эта инструкция для быстрой проверки всего стека на своей машине.
+Быстрый прогон стека на Apple Silicon Mac.
 
-## Требования
-
-- Apple Silicon Mac (M1/M2/M3/M4)
-- LM Studio установлен и запущен **хотя бы один раз** (чтобы инициализировать `lms` CLI)
-- Хотя бы одна MLX-модель (формат `safetensors`) скачана в LM Studio
-- Интернет для первоначальной установки пакетов
-
----
-
-## Вариант A — Интерактивный мастер (рекомендуется)
+## Интерактивный путь
 
 ```bash
-git clone git@github.com:aarogozin/mlx-to-isolated-hermes.git
-cd mlx-to-isolated-hermes
-make setup
-```
-
-Мастер сам:
-1. Установит все зависимости через Homebrew (если нужно)
-2. Предложит выбрать backend: **Multipass VM** / VMware Fusion VM / Docker
-3. Настроит API-ключ и (опционально) Telegram-бота
-4. Запросит выбор модели из каталога LM Studio
-5. Развернёт весь стек и покажет URL Dashboard + статус Telegram
-
----
-
-## Вариант B — Пошагово вручную
-
-```bash
-# 1. Bootstrap (Homebrew, oMLX, LM Studio CLI, Docker, Multipass)
 make bootstrap
+make setup
+make agent-status
+make agent-open-dashboard
+```
 
-# 2. Проверка системы
+`make setup` выбирает Hermes, backend (`multipass` или `docker`), Telegram credentials из `.env`, локальную MLX-модель из LM Studio и запускает стек.
+
+## Ручной Multipass smoke
+
+```bash
 make doctor
-
-# 3. Просмотр скачанных моделей
 make models-list
-
-# 4. Синхронизация модели и выбор активной
 make model-select
-
-# 5. Запуск oMLX в фоне (launchd, переживает перезагрузку)
 make model-start-bg
-
-# 6. Создание VM-сандбокса (Multipass, ~5 мин)
 make vm-create
-
-# 7. Установка Hermes в VM + синхронизация модели
-make e2e-ready
-
-# 8. SSH в VM и запуск агента
-make vm-ssh
-# Внутри VM:
-hermes
+make agent-start
+make agent-status
+make shared-mounts-check
 ```
 
----
+Если `OBSIDIAN_SHARED_PATH` не задан, `shared-mounts-check` честно пропустит проверку.
 
-## Docker (preview)
+## Docker smoke
+
+Docker использует официальный образ `nousresearch/hermes-agent:latest`; локальный image в этом проекте не собирается.
 
 ```bash
-# Сборка образа
-make docker-build
-
-# Создание контейнера и запуск
-make docker-create
-make docker-start
-
-# Шелл в контейнере
-make docker-shell
-# Внутри:
-hermes
+SANDBOX_BACKEND=docker make agent-start
+SANDBOX_BACKEND=docker make agent-status
+SANDBOX_BACKEND=docker make agent-shell
 ```
 
----
-
-## Hermes Dashboard
+Низкоуровневый Docker e2e остался script-командой:
 
 ```bash
-# Запуск (SSH-туннель из VM → localhost:9119)
-make dashboard-start
-
-# Открыть в браузере
-make dashboard-open
-# → http://127.0.0.1:9119
+./scripts/docker-e2e.sh
 ```
 
----
-
-## Telegram Gateway (опционально)
+## Release gate
 
 ```bash
-# Создай бота у @BotFather, добавь в .env:
-# TELEGRAM_BOT_TOKEN=...
-# TELEGRAM_USER_ID=...  (получить у @userinfobot)
-
-make telegram-start
-make telegram-status
+make release-check
+SKIP_VM_E2E=1 SKIP_DOCKER_E2E=1 make release-check
 ```
 
----
+`release-check` делает shell syntax, mock-тест shared-folder логики, host doctor/model check, VM e2e, shared-folder smoke, Docker e2e, Telegram/dashboard status.
 
-## Проверочные команды
+## Полезные команды
 
 ```bash
-make doctor                  # полная диагностика системы
-make vm-status               # состояние VM и IP
-make model-check             # проверка доступности oMLX API
-make release-check           # финальная проверка перед релизом
-SKIP_VM_E2E=1 SKIP_DOCKER_E2E=1 make release-check  # быстрая
+make clean-all
+make model-start-bg
+make model-stop-bg
+make shared-mounts-sync
+make shared-mounts-status
+make vm-snapshot
+make vm-reset
 ```
 
----
+## Структура
 
-## Смена модели
-
-```bash
-# Интерактивно
-make model-select
-
-# Не-интерактивно
-MODEL=qwen3.6-27b-ud-mlx make model-select
-
-# Влиять на авто-выбор модели при синхронизации
-MODEL_DEFAULT_STRATEGY=largest-tool make models-sync  # default
-MODEL_DEFAULT_STRATEGY=smallest-tool make models-sync # оригинальное поведение
-```
-
----
-
-## Docker Image из GHCR (CI-сборка)
-
-```bash
-# Получить образ собранный CI
-docker pull ghcr.io/aarogozin/mlx-to-isolated-hermes:main
-
-# Запустить вручную
-docker run --rm -it --platform linux/arm64 \
-  ghcr.io/aarogozin/mlx-to-isolated-hermes:main \
-  /opt/hermes/.venv/bin/hermes --help
-```
-
----
-
-## Структура проекта
-
-```
+```text
 scripts/
-  setup.sh              ← интерактивный мастер (ГЛАВНАЯ ТОЧКА ВХОДА)
-  vm-common.sh          ← общие VM-хелперы (Multipass + VMware Fusion)
-  bootstrap-macos.sh    ← установка зависимостей
-  model-*.sh            ← управление oMLX
-  vm-*.sh               ← управление VM
-  docker-*.sh           ← управление Docker
-  dashboard-control.sh  ← управление Dashboard
-  telegram-control.sh   ← управление Telegram-гейтвеем
-  doctor.sh             ← диагностика системы
-docker/
-  Dockerfile            ← образ Hermes для ARM64
+  setup.sh                 main interactive entrypoint
+  bootstrap-macos.sh       host dependency bootstrap
+  vm-common.sh             Multipass guest helpers
+  vm-create-multipass.sh   Ubuntu 24.04 ARM64 VM create
+  agent-control.sh         unified Hermes control
+  shared-mounts.sh         shared folder sync/status
+  shared-mounts-check.sh   real shared folder smoke
+  test-shared-mounts-mock.sh
 .github/workflows/
-  docker.yml            ← CI: build + push → ghcr.io
-  release.yml           ← CI: GitHub Release по тегу v*
+  ci.yml                   shell + mocked shared-folder tests
+  release.yml              GitHub Release from tags
 ```
