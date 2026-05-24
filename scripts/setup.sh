@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/setup.sh — Interactive oMLX → Hermes Setup Wizard
+# scripts/setup.sh — Interactive oMLX → local agent Setup Wizard
 #
 # Usage:
 #   ./scripts/setup.sh
@@ -7,10 +7,10 @@
 #
 # Guides you through:
 #   1. Detecting installed tools
-#   2. Choosing an agent runtime and sandbox backend (Hermes / Multipass or Docker)
+#   2. Choosing an agent runtime and sandbox backend
 #   3. Configuring credentials (.env)
 #   4. Selecting a local LLM model
-#   5. Deploying the full stack (oMLX + Hermes + Dashboard + Telegram)
+#   5. Deploying the full stack (oMLX + agent + Dashboard/Control UI + Telegram)
 #   6. Printing the Dashboard URL and confirming Telegram access
 
 set -euo pipefail
@@ -115,7 +115,7 @@ print_banner() {
 
   ╔══════════════════════════════════════════════════════════════╗
   ║                                                              ║
-  ║        oMLX  →  Hermes   ·   Setup Wizard   🚀              ║
+  ║        oMLX  →  Agent    ·   Setup Wizard   🚀              ║
   ║                                                              ║
   ║    Apple Silicon  ·  Local LLM  ·  Isolated Agent Stack     ║
   ║                                                              ║
@@ -183,15 +183,17 @@ run_bootstrap_if_needed() {
 # ── Step 3: Choose runtime and backend ────────────────────────────────────────
 AGENT_RUNTIME=""
 BACKEND=""
+PREVIOUS_AGENT_RUNTIME=""
+PREVIOUS_SANDBOX_BACKEND=""
 
 choose_runtime() {
   step "Choose agent runtime"
-  printf "  ${DIM}Hermes is fully supported now. OpenClaw wiring is prepared as a stub.${RESET}\n"
+  printf "  ${DIM}Hermes and OpenClaw can run in Docker or Multipass. Only one stack may run at a time.${RESET}\n"
 
   local idx
   idx="$(choose_menu "Which agent runtime do you want?" \
     "Hermes      — supported" \
-    "OpenClaw    — planned adapter stub")"
+    "OpenClaw    — supported")"
 
   ensure_env_file
   case "${idx}" in
@@ -203,23 +205,14 @@ choose_runtime() {
     1)
       AGENT_RUNTIME="openclaw"
       env_put AGENT_RUNTIME "openclaw"
-      warn "OpenClaw support is prepared but not implemented end-to-end yet."
-      cat <<'EOF'
-  Next implementation step:
-    AGENT_RUNTIME=openclaw make agent-status
-
-  References:
-    https://docs.openclaw.ai/install/docker
-    https://docs.openclaw.ai/channels/telegram
-EOF
-      exit 0
+      ok "Agent runtime: OpenClaw"
       ;;
   esac
 }
 
 choose_backend() {
   step "Choose sandbox backend"
-  printf "  ${DIM}This controls where the Hermes agent runs.\n"
+  printf "  ${DIM}This controls where the selected agent runs.\n"
   printf "  Inference (LLM) always stays on your Mac via oMLX.${RESET}\n"
 
   local -a options=()
@@ -234,9 +227,9 @@ choose_backend() {
   keys+=("multipass")
 
   if [[ "${HAVE_DOCKER}" -eq 1 ]]; then
-    options+=("Docker           — official Hermes image, daemon-friendly")
+    options+=("Docker           — official agent image, daemon-friendly")
   else
-    options+=("Docker           — official Hermes image  ✦ Docker Desktop not running")
+    options+=("Docker           — official agent image  ✦ Docker Desktop not running")
   fi
   keys+=("docker")
 
@@ -292,7 +285,7 @@ configure_credentials() {
   tg_token="$(env_get TELEGRAM_BOT_TOKEN)"
 
   if [[ -z "${tg_token}" ]]; then
-    printf "  ${DIM}Telegram lets you chat with Hermes from your phone. Press Enter to skip.${RESET}\n"
+    printf "  ${DIM}Telegram lets you chat with the agent from your phone. Press Enter to skip.${RESET}\n"
     tg_token="$(prompt "Telegram bot token (from @BotFather)")"
     if [[ -n "${tg_token}" ]]; then
       env_put TELEGRAM_BOT_TOKEN "${tg_token}"
@@ -314,6 +307,26 @@ configure_credentials() {
     else
       ok "Telegram user ID: ${tg_uid}"
     fi
+  fi
+
+  # ── Tailscale (optional) ──
+  printf "\n"
+  local ts_authkey
+  ts_authkey="$(env_get TAILSCALE_AUTH_KEY)"
+
+  if [[ -z "${ts_authkey}" ]]; then
+    printf "  ${DIM}Tailscale Auth Key allows the Multipass VM to automatically join your tailnet. Optional.${RESET}\n"
+    ts_authkey="$(prompt "Tailscale Auth Key (tskey-auth-...)" "")"
+    if [[ -n "${ts_authkey}" ]]; then
+      env_put TAILSCALE_ENABLED "1"
+      env_put TAILSCALE_AUTH_KEY "${ts_authkey}"
+      ok "Tailscale Auth Key saved"
+    else
+      info "Tailscale Key skipped — you can add TAILSCALE_AUTH_KEY to .env later"
+    fi
+  else
+    env_put TAILSCALE_ENABLED "1"
+    ok "Tailscale Auth Key already configured"
   fi
 }
 
@@ -355,7 +368,7 @@ configure_model() {
   fi
 
   local choice
-  choice="$(choose_menu "Select the model for Hermes:" "${model_labels[@]}")"
+  choice="$(choose_menu "Select the model for ${AGENT_RUNTIME}:" "${model_labels[@]}")"
   SELECTED_MODEL="${model_ids[$choice]}"
 
   MODEL="${SELECTED_MODEL}" "${SCRIPT_DIR}/models-sync-omlx.sh" >/dev/null 2>&1 || true
@@ -376,55 +389,38 @@ start_omlx() {
 
 # ── Step 7: Create sandbox ────────────────────────────────────────────────────
 create_sandbox() {
-  local vm_name
-  vm_name="$(env_get VM_NAME)"; vm_name="${vm_name:-omlx-agent-ubuntu}"
-
-  case "${BACKEND}" in
-    multipass)
-      step "Setting up Multipass VM"
-      if multipass info "${vm_name}" >/dev/null 2>&1; then
-        info "VM '${vm_name}' already exists"
-      else
-        substep "Creating VM (this takes a few minutes)..."
-        "${SCRIPT_DIR}/vm-create.sh"
-      fi
-      substep "Installing Hermes in VM..."
-      "${SCRIPT_DIR}/agents-install.sh"
-      substep "Syncing model catalog to Hermes..."
-      "${SCRIPT_DIR}/hermes-sync-models.sh"
-      ;;
-
-    docker)
-      step "Setting up Docker container"
-      substep "Creating container..."
-      "${SCRIPT_DIR}/docker-create.sh"
-      substep "Starting container..."
-      "${SCRIPT_DIR}/docker-control.sh" start
-      ;;
-  esac
-  ok "Sandbox ready"
+  step "Starting selected agent stack"
+  if ! AGENT_RUNTIME="${AGENT_RUNTIME}" SANDBOX_BACKEND="${BACKEND}" AGENT_CONFLICT_POLICY=prompt "${SCRIPT_DIR}/agent-control.sh" start; then
+    [[ -n "${PREVIOUS_AGENT_RUNTIME}" ]] && env_put AGENT_RUNTIME "${PREVIOUS_AGENT_RUNTIME}"
+    [[ -n "${PREVIOUS_SANDBOX_BACKEND}" ]] && env_put SANDBOX_BACKEND "${PREVIOUS_SANDBOX_BACKEND}"
+    die "Agent stack start failed; restored previous runtime/backend selection in .env."
+  fi
+  ok "Agent stack ready"
 }
 
 # ── Step 8: Dashboard ─────────────────────────────────────────────────────────
 DASHBOARD_URL=""
 
 start_dashboard() {
-  step "Starting Hermes Dashboard"
+  step "Dashboard / Control UI"
   local port
-  if [[ "${BACKEND}" == "docker" ]]; then
+  if [[ "${AGENT_RUNTIME}" == "openclaw" ]]; then
+    port="$(env_get OPENCLAW_CONTROL_PORT)"; port="${port:-18789}"
+    local token
+    token="$(env_get OPENCLAW_GATEWAY_TOKEN)"
+    if [[ -n "${token}" ]]; then
+      DASHBOARD_URL="http://127.0.0.1:${port}/#token=${token}"
+    else
+      DASHBOARD_URL="http://127.0.0.1:${port}"
+    fi
+  elif [[ "${BACKEND}" == "docker" ]]; then
     port="$(env_get DOCKER_DASHBOARD_PORT)"; port="${port:-9120}"
+    DASHBOARD_URL="http://127.0.0.1:${port}"
   else
     port="$(env_get HERMES_DASHBOARD_PORT)"; port="${port:-9119}"
+    DASHBOARD_URL="http://127.0.0.1:${port}"
   fi
-
-  if [[ "${BACKEND}" == "docker" ]]; then
-    DASHBOARD_TARGET=docker "${SCRIPT_DIR}/dashboard-control.sh" start
-  else
-    "${SCRIPT_DIR}/dashboard-control.sh" start
-  fi
-
-  DASHBOARD_URL="http://127.0.0.1:${port}"
-  ok "Dashboard: ${DASHBOARD_URL}"
+  ok "UI: ${DASHBOARD_URL}"
 }
 
 # ── Step 9: Telegram gateway ──────────────────────────────────────────────────
@@ -435,14 +431,10 @@ start_telegram() {
   tg_token="$(env_get TELEGRAM_BOT_TOKEN)"
   [[ -n "${tg_token}" ]] || { info "Telegram not configured — skipping gateway"; return; }
 
-  step "Starting Telegram gateway"
-  if [[ "${BACKEND}" == "docker" ]]; then
-    TELEGRAM_TARGET=docker "${SCRIPT_DIR}/telegram-control.sh" start
-  else
-    "${SCRIPT_DIR}/telegram-control.sh" start
-  fi
+  step "Telegram gateway"
+  info "Telegram is managed by the selected agent stack."
   TELEGRAM_STARTED=1
-  ok "Telegram gateway started"
+  ok "Telegram configured"
 }
 
 # ── Step 10: Verify Telegram connectivity ─────────────────────────────────────
@@ -482,14 +474,20 @@ DONE
   printf "${RESET}\n"
 
   # ── Stack info ──
+  printf "  ${BOLD}Runtime:${RESET}    %s\n"   "${AGENT_RUNTIME}"
   printf "  ${BOLD}Backend:${RESET}    %s\n"   "${BACKEND}"
   printf "  ${BOLD}Model:${RESET}      %s\n"   "${model}"
   printf "  ${BOLD}oMLX API:${RESET}   %s\n"   "${base_url}"
   printf "\n"
 
   # ── Dashboard ──
-  printf "  ${BOLD}${CYAN}Hermes Dashboard${RESET}\n"
+  printf "  ${BOLD}${CYAN}Agent UI${RESET}\n"
   printf "  ${BOLD}  ➜  %s${RESET}\n" "${DASHBOARD_URL}"
+  if [[ "${AGENT_RUNTIME}" == "openclaw" ]]; then
+    local oc_token
+    oc_token="$(env_get OPENCLAW_GATEWAY_TOKEN)"
+    [[ -n "${oc_token}" ]] && printf "  ${DIM}     OPENCLAW_GATEWAY_TOKEN=%s${RESET}\n" "${oc_token}"
+  fi
   printf "\n"
 
   # ── Telegram ──
@@ -503,6 +501,8 @@ DONE
       fi
       if [[ -n "${tg_uid}" ]]; then
         printf "  ${DIM}   Auto-approved for Telegram user ID: %s${RESET}\n" "${tg_uid}"
+      elif [[ "${AGENT_RUNTIME}" == "openclaw" ]]; then
+        printf "  ${DIM}   OpenClaw will use Telegram pairing/Control UI approval for first contact.${RESET}\n"
       else
         printf "  ${DIM}   To approve access: ${BOLD}./scripts/telegram-control.sh pairing${RESET}${DIM} then ${BOLD}CODE=<code> ./scripts/telegram-control.sh approve${RESET}\n"
       fi
@@ -543,6 +543,9 @@ main() {
   fi
 
   print_banner
+  ensure_env_file
+  PREVIOUS_AGENT_RUNTIME="$(env_get AGENT_RUNTIME)"
+  PREVIOUS_SANDBOX_BACKEND="$(env_get SANDBOX_BACKEND)"
   detect_state
   run_bootstrap_if_needed
   choose_runtime

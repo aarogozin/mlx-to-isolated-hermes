@@ -7,6 +7,9 @@ ENV_FILE="${PROJECT_ROOT}/.env"
 ENV_EXAMPLE="${PROJECT_ROOT}/.env.example"
 STATE_DIR="${PROJECT_ROOT}/.vm"
 
+OVERRIDE_AGENT_RUNTIME="${AGENT_RUNTIME:-}"
+OVERRIDE_VM_NAME="${VM_NAME:-}"
+
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -19,7 +22,15 @@ elif [[ -f "${ENV_EXAMPLE}" ]]; then
   set +a
 fi
 
-VM_NAME="${VM_NAME:-omlx-agent-ubuntu}"
+AGENT_RUNTIME="${OVERRIDE_AGENT_RUNTIME:-${AGENT_RUNTIME:-hermes}}"
+HERMES_VM_NAME="${HERMES_VM_NAME:-${VM_NAME:-omlx-agent-ubuntu}}"
+OPENCLAW_VM_NAME="${OPENCLAW_VM_NAME:-omlx-openclaw-ubuntu}"
+case "${AGENT_RUNTIME}" in
+  hermes) DEFAULT_VM_NAME="${HERMES_VM_NAME}" ;;
+  openclaw) DEFAULT_VM_NAME="${OPENCLAW_VM_NAME}" ;;
+  *) DEFAULT_VM_NAME="${VM_NAME:-omlx-agent-ubuntu}" ;;
+esac
+VM_NAME="${OVERRIDE_VM_NAME:-${DEFAULT_VM_NAME}}"
 VM_CPUS="${VM_CPUS:-4}"
 VM_MEMORY="${VM_MEMORY:-8G}"
 VM_DISK="${VM_DISK:-80G}"
@@ -35,6 +46,10 @@ MULTIPASS_LAUNCH_TIMEOUT="${MULTIPASS_LAUNCH_TIMEOUT:-900}"
 VM_PACKAGE_UPGRADE="${VM_PACKAGE_UPGRADE:-false}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY}}"
+TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-}"
+TAILSCALE_ENABLED="${TAILSCALE_ENABLED:-0}"
+TAILSCALE_HOSTNAME="${TAILSCALE_HOSTNAME:-${VM_NAME}}"
+TAILSCALE_EXTRA_ARGS="${TAILSCALE_EXTRA_ARGS:-}"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -160,6 +175,7 @@ packages:
   - python3-venv
 write_files:
   - path: /usr/local/sbin/update-model-host-alias
+    permissions: '0755'
     content: |
       #!/usr/bin/env bash
       set -euo pipefail
@@ -171,6 +187,7 @@ write_files:
       printf '%s model-host.internal\n' "\${gateway}" >> /etc/hosts.tmp
       mv /etc/hosts.tmp /etc/hosts
   - path: /etc/systemd/system/model-host-alias.service
+    permissions: '0644'
     content: |
       [Unit]
       Description=Map model-host.internal to the default gateway
@@ -185,6 +202,7 @@ write_files:
       [Install]
       WantedBy=multi-user.target
   - path: /etc/profile.d/local-model-server.sh
+    permissions: '0644'
     content: |
       export OPENAI_BASE_URL=\${OPENAI_BASE_URL:-http://model-host.internal:8000/v1}
       export ANTHROPIC_BASE_URL=\${ANTHROPIC_BASE_URL:-http://model-host.internal:8000}
@@ -199,6 +217,18 @@ runcmd:
   - systemctl daemon-reload
   - systemctl enable --now model-host-alias.service
   - systemctl enable --now ssh
+EOF
+
+  if [[ "${TAILSCALE_ENABLED}" == "1" || "${TAILSCALE_ENABLED}" == "true" || -n "${TAILSCALE_AUTH_KEY}" ]]; then
+    cat >> "${CLOUD_INIT}" <<EOF
+  - curl -fsSL https://tailscale.com/install.sh | sh
+EOF
+    if [[ -n "${TAILSCALE_AUTH_KEY}" ]]; then
+      printf '  - tailscale up --authkey="%s" --hostname="%s" --accept-routes %s\n' "${TAILSCALE_AUTH_KEY}" "${TAILSCALE_HOSTNAME}" "${TAILSCALE_EXTRA_ARGS}" >> "${CLOUD_INIT}"
+    fi
+  fi
+
+  cat >> "${CLOUD_INIT}" <<EOF
 final_message: "omlx-agent Multipass Ubuntu VM is ready after \$UPTIME seconds"
 EOF
 }
@@ -246,7 +276,15 @@ USER_SSH_PUBLIC_KEY=$(shell_quote "${USER_SSH_PUBLIC_KEY}")
 VM_SNAPSHOT_NAME=$(shell_quote "${VM_SNAPSHOT_NAME}")
 EOF
 
-  set_env_value VM_NAME "${VM_NAME}"
+  case "${AGENT_RUNTIME}" in
+    hermes)
+      set_env_value VM_NAME "${VM_NAME}"
+      set_env_value HERMES_VM_NAME "${VM_NAME}"
+      ;;
+    openclaw)
+      set_env_value OPENCLAW_VM_NAME "${VM_NAME}"
+      ;;
+  esac
   set_env_value VM_CPUS "${VM_CPUS}"
   set_env_value VM_MEMORY "${VM_MEMORY}"
   set_env_value VM_DISK "${VM_DISK}"
@@ -257,6 +295,8 @@ EOF
   set_env_value UBUNTU_MULTIPASS_IMAGE "${UBUNTU_MULTIPASS_IMAGE}"
   set_env_value MULTIPASS_LAUNCH_TIMEOUT "${MULTIPASS_LAUNCH_TIMEOUT}"
   set_env_value VM_PACKAGE_UPGRADE "${VM_PACKAGE_UPGRADE}"
+  set_env_value TAILSCALE_ENABLED "${TAILSCALE_ENABLED}"
+  set_env_value TAILSCALE_HOSTNAME "${TAILSCALE_HOSTNAME}"
 }
 
 main() {
@@ -275,6 +315,18 @@ Instance: ${VM_NAME}
 Image: ${UBUNTU_MULTIPASS_IMAGE}
 Resources: ${VM_CPUS} vCPU, ${VM_MEMORY} RAM, ${VM_DISK} disk
 SSH user: ${VM_SSH_USER}
+EOF
+
+  if [[ -n "${TAILSCALE_AUTH_KEY}" ]]; then
+    echo "Tailscale: Configured with Auth Key (automated join)"
+  elif [[ "${TAILSCALE_ENABLED}" == "1" || "${TAILSCALE_ENABLED}" == "true" ]]; then
+    echo "Tailscale: Installed. To join your tailnet, run:"
+    echo "  multipass exec ${VM_NAME} -- sudo tailscale up --hostname=${TAILSCALE_HOSTNAME}"
+  else
+    echo "Tailscale: Disabled. Set TAILSCALE_ENABLED=1 or TAILSCALE_AUTH_KEY to install it in the VM."
+  fi
+
+  cat <<EOF
 
 Next:
   make vm-ssh

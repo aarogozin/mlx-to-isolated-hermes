@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${PROJECT_ROOT}/.env"
 
+OVERRIDE_VM_NAME="${VM_NAME:-}"
+
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -18,7 +20,7 @@ fi
 # shellcheck source=vm-common.sh
 source "${SCRIPT_DIR}/vm-common.sh"
 
-VM_NAME="${VM_NAME:-omlx-agent-ubuntu}"
+VM_NAME="${OVERRIDE_VM_NAME:-${HERMES_VM_NAME:-${VM_NAME:-omlx-agent-ubuntu}}}"
 VM_SSH_USER="${VM_SSH_USER:-agent}"
 OPENAI_BASE_URL_GUEST="${OPENAI_BASE_URL_GUEST:-http://model-host.internal:8000/v1}"
 ANTHROPIC_BASE_URL_GUEST="${ANTHROPIC_BASE_URL_GUEST:-http://model-host.internal:8000}"

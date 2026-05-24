@@ -1,6 +1,6 @@
 # Release Checklist
 
-## 0.2.0
+## 0.3.0
 
 1. Start from a clean public workspace.
 2. Run host bootstrap and diagnostics:
@@ -26,7 +26,31 @@
    make shared-mounts-check
    ```
 
-7. Stop, snapshot, and restart the Multipass VM:
+7. Scan local model stores before release:
+
+   ```bash
+   make models-doctor
+   ```
+
+   Use `make models-prune-incomplete` only for artifacts that are clearly stale/incomplete.
+
+8. Smoke the selected OpenClaw paths when changing OpenClaw wiring:
+
+   ```bash
+   AGENT_RUNTIME=openclaw SANDBOX_BACKEND=docker make agent-start
+   AGENT_RUNTIME=openclaw SANDBOX_BACKEND=docker make agent-stop
+   AGENT_RUNTIME=openclaw SANDBOX_BACKEND=multipass make agent-switch
+   AGENT_RUNTIME=openclaw SANDBOX_BACKEND=multipass make agent-pause
+   ```
+
+   Confirm Hermes and OpenClaw use separate VMs:
+
+   ```bash
+   AGENT_RUNTIME=hermes make vm-status
+   AGENT_RUNTIME=openclaw make vm-status
+   ```
+
+9. Stop, snapshot, and restart the Multipass VM:
 
    ```bash
    make vm-stop
@@ -34,24 +58,24 @@
    make vm-start
    ```
 
-8. Run final release gate:
+10. Run final release gate:
 
    ```bash
    make release-check
    ```
 
-9. Confirm no local runtime state is tracked:
+11. Confirm no local runtime state is tracked:
 
    ```bash
    git status --short
    git ls-files .env .runtime .vm .cache
    ```
 
-10. Commit, tag, and push:
+12. Commit, tag, and push:
 
    ```bash
    git add .
-   git commit -m "Release 0.2.0"
-   git tag v0.2.0
+   git commit -m "Release 0.3.0"
+   git tag v0.3.0
    git push origin HEAD --tags
    ```

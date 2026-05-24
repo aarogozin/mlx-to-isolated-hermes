@@ -1,6 +1,6 @@
 # Remote Dashboard Access
 
-Hermes Dashboard can expose agent configuration, API keys, and session state. Keep the default local tunnel unless you need remote access.
+Hermes Dashboard and OpenClaw Control UI can expose agent configuration, API keys, approvals, and session state. Keep the default local tunnel unless you need remote access.
 
 ## Recommended: Tailscale Serve
 
@@ -8,17 +8,45 @@ Use Tailscale Serve when the dashboard only needs to be reachable by your own de
 
 ```bash
 make agent-start
-./scripts/dashboard-remote.sh tailscale-start
-./scripts/dashboard-remote.sh tailscale-status
+make dashboard-remote-start
+make dashboard-remote-status
 ```
 
 Stop serving it with:
 
 ```bash
-./scripts/dashboard-remote.sh tailscale-stop
+make dashboard-remote-stop
 ```
 
 This is the safest default remote mode because it is not public internet exposure.
+
+Tailscale is optional and disabled by default:
+
+```bash
+TAILSCALE_ENABLED=1
+TAILSCALE_SERVE_MODE=serve
+```
+
+For automated VM registration, set a pre-approved auth key locally:
+
+```bash
+TAILSCALE_AUTH_KEY=tskey-auth-...
+TAILSCALE_HOSTNAME=omlx-openclaw-ubuntu
+TAILSCALE_EXTRA_ARGS=--advertise-tags=tag:local-agent
+```
+
+OpenClaw Control UI uses `OPENCLAW_GATEWAY_TOKEN` by default. `make agent-open-dashboard` prints a URL with the token fragment:
+
+```text
+http://127.0.0.1:18789/#token=<OPENCLAW_GATEWAY_TOKEN>
+```
+
+If you want OpenClaw to trust Tailscale identity headers instead of pasting the shared token, enable it and add the exact Tailscale HTTPS origin:
+
+```bash
+OPENCLAW_ALLOW_TAILSCALE_AUTH=1
+TAILSCALE_DASHBOARD_ORIGIN=https://your-mac.your-tailnet.ts.net
+```
 
 ## Public HTTPS: Cloudflare Tunnel + Access
 

@@ -13,9 +13,15 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 VM_NAME="${VM_NAME:-omlx-agent-ubuntu}"
+HERMES_VM_NAME="${HERMES_VM_NAME:-${VM_NAME}}"
+OPENCLAW_VM_NAME="${OPENCLAW_VM_NAME:-omlx-openclaw-ubuntu}"
 DOCKER_NAME="${DOCKER_NAME:-omlx-agent-docker}"
 DOCKER_DATA_VOLUME="${DOCKER_DATA_VOLUME:-${DOCKER_NAME}-data}"
 DOCKER_WORKSPACE_VOLUME="${DOCKER_WORKSPACE_VOLUME:-${DOCKER_NAME}-workspace}"
+OPENCLAW_DOCKER_NAME="${OPENCLAW_DOCKER_NAME:-omlx-agent-openclaw-docker}"
+OPENCLAW_DOCKER_CONFIG_VOLUME="${OPENCLAW_DOCKER_CONFIG_VOLUME:-${OPENCLAW_DOCKER_NAME}-config}"
+OPENCLAW_DOCKER_WORKSPACE_VOLUME="${OPENCLAW_DOCKER_WORKSPACE_VOLUME:-${OPENCLAW_DOCKER_NAME}-workspace}"
+OPENCLAW_DOCKER_AUTH_VOLUME="${OPENCLAW_DOCKER_AUTH_VOLUME:-${OPENCLAW_DOCKER_NAME}-auth}"
 FORCE="${FORCE:-0}"
 CLEAN_STEP_TIMEOUT_SECONDS="${CLEAN_STEP_TIMEOUT_SECONDS:-30}"
 
@@ -38,19 +44,22 @@ EOF
 
   cat <<EOF
 This will delete the local sandbox runtime:
-  - Multipass VM: ${VM_NAME}
+  - Hermes Multipass VM: ${HERMES_VM_NAME}
+  - OpenClaw Multipass VM: ${OPENCLAW_VM_NAME}
   - Docker container: ${DOCKER_NAME}
   - Docker volumes: ${DOCKER_DATA_VOLUME}, ${DOCKER_WORKSPACE_VOLUME}
+  - OpenClaw Docker container: ${OPENCLAW_DOCKER_NAME}
+  - OpenClaw Docker volumes: ${OPENCLAW_DOCKER_CONFIG_VOLUME}, ${OPENCLAW_DOCKER_WORKSPACE_VOLUME}, ${OPENCLAW_DOCKER_AUTH_VOLUME}
 
 It will keep:
   - .env and secrets
   - LM Studio downloaded models
   - Homebrew, Docker Desktop, Multipass
 
-Type the VM name to continue: ${VM_NAME}
+Type clean-all to continue:
 EOF
   read -r answer
-  if [[ "${answer}" != "${VM_NAME}" ]]; then
+  if [[ "${answer}" != "clean-all" ]]; then
     echo "Aborted."
     exit 1
   fi
@@ -109,21 +118,25 @@ stop_omlx() {
 
 stop_telegram() {
   run_with_timeout "${CLEAN_STEP_TIMEOUT_SECONDS}" "${SCRIPT_DIR}/telegram-control.sh" stop-host >/dev/null 2>&1 || true
-  run_with_timeout "${CLEAN_STEP_TIMEOUT_SECONDS}" env TELEGRAM_TARGET=vm "${SCRIPT_DIR}/telegram-control.sh" stop >/dev/null 2>&1 || true
+  run_with_timeout "${CLEAN_STEP_TIMEOUT_SECONDS}" env VM_NAME="${HERMES_VM_NAME}" TELEGRAM_TARGET=vm "${SCRIPT_DIR}/telegram-control.sh" stop >/dev/null 2>&1 || true
   run_with_timeout "${CLEAN_STEP_TIMEOUT_SECONDS}" env TELEGRAM_TARGET=docker "${SCRIPT_DIR}/telegram-control.sh" stop >/dev/null 2>&1 || true
+  run_with_timeout "${CLEAN_STEP_TIMEOUT_SECONDS}" env VM_NAME="${OPENCLAW_VM_NAME}" "${SCRIPT_DIR}/openclaw-control.sh" stop multipass >/dev/null 2>&1 || true
+  run_with_timeout "${CLEAN_STEP_TIMEOUT_SECONDS}" "${SCRIPT_DIR}/openclaw-control.sh" stop docker >/dev/null 2>&1 || true
 }
 
 stop_dashboards() {
-  run_with_timeout "${CLEAN_STEP_TIMEOUT_SECONDS}" env DASHBOARD_TARGET=vm "${SCRIPT_DIR}/dashboard-control.sh" stop >/dev/null 2>&1 || true
+  run_with_timeout "${CLEAN_STEP_TIMEOUT_SECONDS}" env VM_NAME="${HERMES_VM_NAME}" DASHBOARD_TARGET=vm "${SCRIPT_DIR}/dashboard-control.sh" stop >/dev/null 2>&1 || true
   run_with_timeout "${CLEAN_STEP_TIMEOUT_SECONDS}" env DASHBOARD_TARGET=docker "${SCRIPT_DIR}/dashboard-control.sh" stop >/dev/null 2>&1 || true
 }
 
 destroy_docker() {
   "${SCRIPT_DIR}/docker-control.sh" destroy || true
+  "${SCRIPT_DIR}/openclaw-control.sh" destroy docker || true
 }
 
 destroy_vm() {
-  "${SCRIPT_DIR}/vm-control.sh" destroy || true
+  VM_NAME="${HERMES_VM_NAME}" "${SCRIPT_DIR}/vm-control.sh" destroy || true
+  VM_NAME="${OPENCLAW_VM_NAME}" "${SCRIPT_DIR}/vm-control.sh" destroy || true
 }
 
 print_final_status() {
@@ -135,16 +148,27 @@ print_final_status() {
     echo "omlx=stopped"
   fi
 
-  if command -v multipass >/dev/null 2>&1 && multipass info "${VM_NAME}" >/dev/null 2>&1; then
-    echo "vm=present name=${VM_NAME}"
+  if command -v multipass >/dev/null 2>&1 && multipass info "${HERMES_VM_NAME}" >/dev/null 2>&1; then
+    echo "hermes_vm=present name=${HERMES_VM_NAME}"
   else
-    echo "vm=missing name=${VM_NAME}"
+    echo "hermes_vm=missing name=${HERMES_VM_NAME}"
+  fi
+  if command -v multipass >/dev/null 2>&1 && multipass info "${OPENCLAW_VM_NAME}" >/dev/null 2>&1; then
+    echo "openclaw_vm=present name=${OPENCLAW_VM_NAME}"
+  else
+    echo "openclaw_vm=missing name=${OPENCLAW_VM_NAME}"
   fi
 
   if command -v docker >/dev/null 2>&1 && docker container inspect "${DOCKER_NAME}" >/dev/null 2>&1; then
     echo "docker=present container=${DOCKER_NAME}"
   else
     echo "docker=missing container=${DOCKER_NAME}"
+  fi
+
+  if command -v docker >/dev/null 2>&1 && docker container inspect "${OPENCLAW_DOCKER_NAME}" >/dev/null 2>&1; then
+    echo "openclaw_docker=present container=${OPENCLAW_DOCKER_NAME}"
+  else
+    echo "openclaw_docker=missing container=${OPENCLAW_DOCKER_NAME}"
   fi
 
   if command -v docker >/dev/null 2>&1; then
@@ -158,9 +182,24 @@ print_final_status() {
     else
       echo "docker_workspace_volume=missing name=${DOCKER_WORKSPACE_VOLUME}"
     fi
+    if docker volume inspect "${OPENCLAW_DOCKER_CONFIG_VOLUME}" >/dev/null 2>&1; then
+      echo "openclaw_config_volume=present name=${OPENCLAW_DOCKER_CONFIG_VOLUME}"
+    else
+      echo "openclaw_config_volume=missing name=${OPENCLAW_DOCKER_CONFIG_VOLUME}"
+    fi
+    if docker volume inspect "${OPENCLAW_DOCKER_WORKSPACE_VOLUME}" >/dev/null 2>&1; then
+      echo "openclaw_workspace_volume=present name=${OPENCLAW_DOCKER_WORKSPACE_VOLUME}"
+    else
+      echo "openclaw_workspace_volume=missing name=${OPENCLAW_DOCKER_WORKSPACE_VOLUME}"
+    fi
+    if docker volume inspect "${OPENCLAW_DOCKER_AUTH_VOLUME}" >/dev/null 2>&1; then
+      echo "openclaw_auth_volume=present name=${OPENCLAW_DOCKER_AUTH_VOLUME}"
+    else
+      echo "openclaw_auth_volume=missing name=${OPENCLAW_DOCKER_AUTH_VOLUME}"
+    fi
   fi
 
-  "${SCRIPT_DIR}/telegram-control.sh" doctor || true
+  VM_NAME="${HERMES_VM_NAME}" "${SCRIPT_DIR}/telegram-control.sh" doctor || true
 }
 
 main() {

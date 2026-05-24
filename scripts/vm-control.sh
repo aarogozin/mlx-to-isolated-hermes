@@ -5,6 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${PROJECT_ROOT}/.env"
 
+OVERRIDE_AGENT_RUNTIME="${AGENT_RUNTIME:-}"
+OVERRIDE_VM_NAME="${VM_NAME:-}"
+
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -13,7 +16,15 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 ACTION="${1:-}"
-VM_NAME="${VM_NAME:-omlx-agent-ubuntu}"
+AGENT_RUNTIME="${OVERRIDE_AGENT_RUNTIME:-${AGENT_RUNTIME:-hermes}}"
+HERMES_VM_NAME="${HERMES_VM_NAME:-${VM_NAME:-omlx-agent-ubuntu}}"
+OPENCLAW_VM_NAME="${OPENCLAW_VM_NAME:-omlx-openclaw-ubuntu}"
+case "${AGENT_RUNTIME}" in
+  hermes) DEFAULT_VM_NAME="${HERMES_VM_NAME}" ;;
+  openclaw) DEFAULT_VM_NAME="${OPENCLAW_VM_NAME}" ;;
+  *) DEFAULT_VM_NAME="${VM_NAME:-omlx-agent-ubuntu}" ;;
+esac
+VM_NAME="${OVERRIDE_VM_NAME:-${DEFAULT_VM_NAME}}"
 VM_SSH_USER="${VM_SSH_USER:-agent}"
 VM_SSH_KEY="${VM_SSH_KEY:-${HOME}/.ssh/omlx_agent_vm_ed25519}"
 VM_SNAPSHOT_NAME="${VM_SNAPSHOT_NAME:-clean-agent-base}"
@@ -38,10 +49,28 @@ multipass_ip() {
   multipass info "${VM_NAME}" | awk '/IPv4/ { print $2; exit }'
 }
 
+ensure_model_host_alias() {
+  multipass exec "${VM_NAME}" -- sudo bash -lc '
+    if [[ -f /usr/local/sbin/update-model-host-alias ]]; then
+      chmod 0755 /usr/local/sbin/update-model-host-alias
+      systemctl daemon-reload
+      systemctl enable --now model-host-alias.service >/dev/null 2>&1 || /usr/local/sbin/update-model-host-alias || true
+    else
+      gateway="$(ip route | awk "/default/ {print \$3; exit}")"
+      if [[ -n "${gateway}" ]]; then
+        grep -v "[[:space:]]model-host\\.internal$" /etc/hosts > /etc/hosts.tmp
+        printf "%s model-host.internal\n" "${gateway}" >> /etc/hosts.tmp
+        mv /etc/hosts.tmp /etc/hosts
+      fi
+    fi
+  ' >/dev/null 2>&1 || true
+}
+
 case "${ACTION}" in
   start)
     require_multipass_vm
     multipass start "${VM_NAME}"
+    ensure_model_host_alias
     ;;
   stop)
     require_multipass_vm
@@ -65,6 +94,7 @@ case "${ACTION}" in
     multipass stop "${VM_NAME}" || true
     multipass restore "${VM_NAME}.${VM_SNAPSHOT_NAME}"
     multipass start "${VM_NAME}"
+    ensure_model_host_alias
     ;;
   destroy)
     command -v multipass >/dev/null 2>&1 || {

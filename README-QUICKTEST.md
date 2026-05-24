@@ -11,13 +11,14 @@ make agent-status
 make agent-open-dashboard
 ```
 
-`make setup` выбирает Hermes, backend (`multipass` или `docker`), Telegram credentials из `.env`, локальную MLX-модель из LM Studio и запускает стек.
+`make setup` выбирает runtime (`hermes` или `openclaw`), backend (`multipass` или `docker`), Telegram credentials из `.env`, локальную MLX-модель из LM Studio и запускает стек.
 
 ## Ручной Multipass smoke
 
 ```bash
 make doctor
 make models-list
+make models-doctor
 make model-select
 make model-start-bg
 make vm-create
@@ -30,7 +31,7 @@ make shared-mounts-check
 
 ## Docker smoke
 
-Docker использует официальный образ `nousresearch/hermes-agent:latest`; локальный image в этом проекте не собирается.
+Docker использует официальные образы: `nousresearch/hermes-agent:latest` для Hermes и `ghcr.io/openclaw/openclaw:latest` для OpenClaw. Локальный image в этом проекте не собирается.
 
 ```bash
 SANDBOX_BACKEND=docker make agent-start
@@ -57,6 +58,12 @@ SKIP_VM_E2E=1 SKIP_DOCKER_E2E=1 make release-check
 
 ```bash
 make clean-all
+make agent-pause
+AGENT_RUNTIME=openclaw SANDBOX_BACKEND=multipass make agent-switch
+AGENT_RUNTIME=hermes SANDBOX_BACKEND=multipass make agent-switch
+make agent-open-dashboard
+make dashboard-remote-start
+make dashboard-remote-stop
 make model-start-bg
 make model-stop-bg
 make shared-mounts-sync
@@ -73,7 +80,8 @@ scripts/
   bootstrap-macos.sh       host dependency bootstrap
   vm-common.sh             Multipass guest helpers
   vm-create-multipass.sh   Ubuntu 24.04 ARM64 VM create
-  agent-control.sh         unified Hermes control
+  agent-control.sh         unified Hermes/OpenClaw control
+  openclaw-control.sh      OpenClaw Docker/Multipass runtime control
   shared-mounts.sh         shared folder sync/status
   shared-mounts-check.sh   real shared folder smoke
   test-shared-mounts-mock.sh

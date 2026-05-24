@@ -10,6 +10,8 @@ OVERRIDE_VM_NAME="${VM_NAME:-}"
 OVERRIDE_OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
 OVERRIDE_OBSIDIAN_GUEST_PATH="${OBSIDIAN_GUEST_PATH:-}"
 OVERRIDE_DOCKER_NAME="${DOCKER_NAME:-}"
+OVERRIDE_OPENCLAW_DOCKER_NAME="${OPENCLAW_DOCKER_NAME:-}"
+OVERRIDE_AGENT_RUNTIME="${AGENT_RUNTIME:-}"
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -19,10 +21,23 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 TARGET="${1:-${OVERRIDE_SANDBOX_BACKEND:-${SANDBOX_BACKEND:-multipass}}}"
-VM_NAME="${OVERRIDE_VM_NAME:-${VM_NAME:-omlx-agent-ubuntu}}"
+AGENT_RUNTIME="${OVERRIDE_AGENT_RUNTIME:-${AGENT_RUNTIME:-hermes}}"
+HERMES_VM_NAME="${HERMES_VM_NAME:-${VM_NAME:-omlx-agent-ubuntu}}"
+OPENCLAW_VM_NAME="${OPENCLAW_VM_NAME:-omlx-openclaw-ubuntu}"
+case "${AGENT_RUNTIME}" in
+  hermes) DEFAULT_VM_NAME="${HERMES_VM_NAME}" ;;
+  openclaw) DEFAULT_VM_NAME="${OPENCLAW_VM_NAME}" ;;
+  *) DEFAULT_VM_NAME="${VM_NAME:-omlx-agent-ubuntu}" ;;
+esac
+VM_NAME="${OVERRIDE_VM_NAME:-${DEFAULT_VM_NAME}}"
 OBSIDIAN_SHARED_PATH="${OVERRIDE_OBSIDIAN_SHARED_PATH:-${OBSIDIAN_SHARED_PATH:-}}"
 OBSIDIAN_GUEST_PATH="${OVERRIDE_OBSIDIAN_GUEST_PATH:-${OBSIDIAN_GUEST_PATH:-/mnt/obsidian}}"
 DOCKER_NAME="${OVERRIDE_DOCKER_NAME:-${DOCKER_NAME:-omlx-agent-docker}}"
+OPENCLAW_DOCKER_NAME="${OVERRIDE_OPENCLAW_DOCKER_NAME:-${OPENCLAW_DOCKER_NAME:-omlx-agent-openclaw-docker}}"
+if [[ "${AGENT_RUNTIME}" == "openclaw" && -z "${OVERRIDE_DOCKER_NAME}" ]]; then
+  DOCKER_NAME="${OPENCLAW_DOCKER_NAME}"
+fi
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
 CHECK_HOST_FILE=""
 CHECK_GUEST_FILE=""
 CHECK_HOST_DOCKER_FILE=""
@@ -39,6 +54,16 @@ normalize_path() {
     path="${HOME}/${path#~/}"
   fi
   printf '%s\n' "${path%/}"
+}
+
+run_host_timeout() {
+  local seconds="$1"
+  shift
+  if [[ -n "${TIMEOUT_BIN}" ]]; then
+    "${TIMEOUT_BIN}" "${seconds}s" "$@"
+  else
+    "$@"
+  fi
 }
 
 host_path="$(normalize_path "${OBSIDIAN_SHARED_PATH}")"
@@ -61,7 +86,7 @@ check_multipass() {
 
   cleanup() {
     rm -f "${CHECK_HOST_FILE}"
-    multipass exec "${VM_NAME}" -- sudo rm -f "${CHECK_GUEST_FILE}" >/dev/null 2>&1 || true
+    run_host_timeout 10 multipass exec "${VM_NAME}" -- sudo rm -f "${CHECK_GUEST_FILE}" >/dev/null 2>&1 || true
   }
   trap cleanup EXIT
 
@@ -70,7 +95,7 @@ check_multipass() {
   CHECK_GUEST_FILE="${guest_file}"
   "${SCRIPT_DIR}/shared-mounts.sh" sync multipass >/dev/null
 
-  guest_content="$(multipass exec "${VM_NAME}" -- sudo cat "${guest_file}")"
+  guest_content="$(run_host_timeout 20 multipass exec "${VM_NAME}" -- sudo cat "${guest_file}")"
   host_content="$(cat "${host_file}")"
   [[ "${guest_content}" == "${host_content}" ]] \
     || die "shared folder content mismatch between host and VM"

@@ -14,6 +14,16 @@ if [[ -f "${ENV_FILE}" ]]; then
   set +a
 fi
 
+AGENT_RUNTIME="${AGENT_RUNTIME:-hermes}"
+SANDBOX_BACKEND="${SANDBOX_BACKEND:-multipass}"
+HERMES_VM_NAME="${HERMES_VM_NAME:-${VM_NAME:-omlx-agent-ubuntu}}"
+OPENCLAW_VM_NAME="${OPENCLAW_VM_NAME:-omlx-openclaw-ubuntu}"
+case "${AGENT_RUNTIME}" in
+  hermes) SELECTED_VM_NAME="${HERMES_VM_NAME}" ;;
+  openclaw) SELECTED_VM_NAME="${OPENCLAW_VM_NAME}" ;;
+  *) SELECTED_VM_NAME="${VM_NAME:-omlx-agent-ubuntu}" ;;
+esac
+
 log() {
   printf '\n==> %s\n' "$*"
 }
@@ -40,15 +50,24 @@ version_str="$(cat VERSION)"
 
 log "Scanning publishable files for local secrets/runtime state"
 legacy_default="$(printf 'b%s' 'ig7')"
-if grep -RIn --exclude-dir=.runtime --exclude-dir=.vm --exclude-dir=.cache --exclude=.env --exclude='*.log' -- "${legacy_default}" .; then
+if grep -RFIn --exclude-dir=.runtime --exclude-dir=.vm --exclude-dir=.cache --exclude=.env --exclude='*.log' -- "${legacy_default}" .; then
   fail "found old hardcoded local API key string in publishable files"
 fi
 
 if [[ -n "${OPENAI_API_KEY:-}" && "${#OPENAI_API_KEY}" -ge 16 ]]; then
-  if grep -RIn --exclude-dir=.runtime --exclude-dir=.vm --exclude-dir=.cache --exclude=.env --exclude='*.log' -- "${OPENAI_API_KEY}" .; then
+  if grep -RFIn --exclude-dir=.runtime --exclude-dir=.vm --exclude-dir=.cache --exclude=.env --exclude='*.log' -- "${OPENAI_API_KEY}" .; then
     fail "found current OPENAI_API_KEY in publishable files"
   fi
 fi
+
+for secret_name in TELEGRAM_BOT_TOKEN TAILSCALE_AUTH_KEY CLOUDFLARE_TUNNEL_TOKEN OPENCLAW_GATEWAY_TOKEN; do
+  secret_value="${!secret_name:-}"
+  if [[ -n "${secret_value}" && "${#secret_value}" -ge 16 ]]; then
+    if grep -RFIn --exclude-dir=.runtime --exclude-dir=.vm --exclude-dir=.cache --exclude=.env --exclude='*.log' -- "${secret_value}" .; then
+      fail "found current ${secret_name} in publishable files"
+    fi
+  fi
+done
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   forbidden_tracked="$(git ls-files .env .runtime .vm .cache 2>/dev/null || true)"
@@ -60,13 +79,21 @@ fi
 log "Running host doctor and model API check"
 make doctor
 make model-check
+make models-doctor
 
 if [[ "${SKIP_VM_E2E:-0}" != "1" ]]; then
   log "Running VM e2e smoke"
-  multipass info "${VM_NAME:-omlx-agent-ubuntu}" >/dev/null 2>&1 || fail "Multipass VM missing. Run make vm-create before release-check."
-  "${SCRIPT_DIR}/e2e-ready.sh"
+  multipass info "${SELECTED_VM_NAME}" >/dev/null 2>&1 || fail "Multipass VM missing: ${SELECTED_VM_NAME}. Run make vm-create before release-check."
+  case "${AGENT_RUNTIME}" in
+    hermes)
+      VM_NAME="${SELECTED_VM_NAME}" "${SCRIPT_DIR}/e2e-ready.sh"
+      ;;
+    openclaw)
+      VM_NAME="${SELECTED_VM_NAME}" "${SCRIPT_DIR}/openclaw-control.sh" status multipass
+      ;;
+  esac
   log "Checking Multipass shared folder"
-  "${SCRIPT_DIR}/shared-mounts-check.sh" multipass
+  AGENT_RUNTIME="${AGENT_RUNTIME}" VM_NAME="${SELECTED_VM_NAME}" "${SCRIPT_DIR}/shared-mounts-check.sh" multipass
 else
   echo "Skipping VM e2e because SKIP_VM_E2E=1"
 fi
@@ -88,15 +115,21 @@ fi
 dashboard_target="${DASHBOARD_TARGET:-${SANDBOX_BACKEND:-vm}}"
 case "${dashboard_target}" in
   docker)
-    if command -v docker >/dev/null 2>&1 && docker container inspect "${DOCKER_NAME:-omlx-agent-docker}" >/dev/null 2>&1; then
+    if [[ "${AGENT_RUNTIME}" == "openclaw" ]]; then
+      "${SCRIPT_DIR}/openclaw-control.sh" status docker
+    elif command -v docker >/dev/null 2>&1 && docker container inspect "${DOCKER_NAME:-omlx-agent-docker}" >/dev/null 2>&1; then
       DASHBOARD_TARGET=docker "${SCRIPT_DIR}/dashboard-control.sh" status
     else
       echo "Skipping Docker dashboard status because container is missing"
     fi
     ;;
   vm|multipass)
-    if multipass info "${VM_NAME:-omlx-agent-ubuntu}" >/dev/null 2>&1; then
-      DASHBOARD_TARGET=vm "${SCRIPT_DIR}/dashboard-control.sh" status
+    if multipass info "${SELECTED_VM_NAME}" >/dev/null 2>&1; then
+      if [[ "${AGENT_RUNTIME}" == "openclaw" ]]; then
+        VM_NAME="${SELECTED_VM_NAME}" "${SCRIPT_DIR}/openclaw-control.sh" status multipass
+      else
+        VM_NAME="${SELECTED_VM_NAME}" DASHBOARD_TARGET=vm "${SCRIPT_DIR}/dashboard-control.sh" status
+      fi
     else
       echo "Skipping VM dashboard status because VM is missing"
     fi

@@ -10,6 +10,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${PROJECT_ROOT}/.env"
 
 OVERRIDE_TELEGRAM_TARGET="${TELEGRAM_TARGET:-}"
+OVERRIDE_VM_NAME="${VM_NAME:-}"
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -23,7 +24,7 @@ source "${SCRIPT_DIR}/vm-common.sh"
 
 ACTION="${1:-status}"
 TARGET="${OVERRIDE_TELEGRAM_TARGET:-${TELEGRAM_TARGET:-vm}}"
-VM_NAME="${VM_NAME:-omlx-agent-ubuntu}"
+VM_NAME="${OVERRIDE_VM_NAME:-${HERMES_VM_NAME:-${VM_NAME:-omlx-agent-ubuntu}}}"
 VM_SSH_USER="${VM_SSH_USER:-agent}"
 DOCKER_NAME="${DOCKER_NAME:-omlx-agent-docker}"
 TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"

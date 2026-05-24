@@ -11,6 +11,7 @@ ENV_FILE="${PROJECT_ROOT}/.env"
 RUNTIME_DIR="${PROJECT_ROOT}/.runtime"
 
 OVERRIDE_DASHBOARD_TARGET="${DASHBOARD_TARGET:-}"
+OVERRIDE_VM_NAME="${VM_NAME:-}"
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -24,7 +25,7 @@ source "${SCRIPT_DIR}/vm-common.sh"
 
 ACTION="${1:-status}"
 TARGET="${OVERRIDE_DASHBOARD_TARGET:-${DASHBOARD_TARGET:-vm}}"
-VM_NAME="${VM_NAME:-omlx-agent-ubuntu}"
+VM_NAME="${OVERRIDE_VM_NAME:-${HERMES_VM_NAME:-${VM_NAME:-omlx-agent-ubuntu}}}"
 VM_SSH_USER="${VM_SSH_USER:-agent}"
 VM_SSH_KEY="${VM_SSH_KEY:-${HOME}/.ssh/omlx_agent_vm_ed25519}"
 DOCKER_NAME="${DOCKER_NAME:-omlx-agent-docker}"

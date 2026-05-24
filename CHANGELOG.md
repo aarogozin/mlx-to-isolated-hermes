@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-05-24
+
+OpenClaw runtime hardening and model artifact cleanup.
+
+- Make OpenClaw deploy end-to-end in Docker and Multipass using the current official CLI/entrypoint flow.
+- Split Multipass VM state by runtime: Hermes keeps `omlx-agent-ubuntu`, OpenClaw uses `omlx-openclaw-ubuntu`.
+- Add conflict policies plus `agent-pause` and `agent-switch` so setup can pause the active stack and continue.
+- Add single-agent conflict detection across Hermes/OpenClaw and Docker/Multipass so Telegram polling is not started twice.
+- Harden OpenClaw Docker volumes, auth-secret storage, gateway token setup, and Control UI ports.
+- Harden OpenClaw Multipass install/start by adding the npm user prefix to PATH and using `openclaw gateway run`.
+- Restore `model-host.internal` automatically on VM start/reset and OpenClaw startup so switched VMs can always reach host oMLX.
+- Make Tailscale optional by default, add remote dashboard helpers, and print OpenClaw Control UI auth URLs with `OPENCLAW_GATEWAY_TOKEN`.
+- Add `models-doctor` and `models-prune-incomplete` to scan LM Studio, oMLX runtime symlinks, and Ollama storage for incomplete downloads.
+- Add timeouts to shared-folder smoke cleanup so Multipass mount cleanup cannot hang release checks.
+- Update docs for the four supported agent/runtime combinations and model cleanup workflow.
+
 ## 0.2.0 — 2026-05-22
 
 Release hardening for the cleaned-up Multipass/Docker stack.

@@ -1,8 +1,9 @@
 SHELL := /bin/bash
 
 .PHONY: bootstrap setup doctor clean-all release-check \
-	models-search models-list models-sync model-select model-start-bg model-stop-bg model-check \
-	agent-start agent-stop agent-restart agent-status agent-logs agent-shell agent-open-dashboard \
+	models-search models-list models-sync models-doctor models-prune-incomplete model-select model-start-bg model-stop-bg model-check \
+	agent-start agent-stop agent-restart agent-pause agent-switch agent-status agent-logs agent-shell agent-open-dashboard \
+	dashboard-remote-start dashboard-remote-stop dashboard-remote-status \
 	vm-create vm-start vm-stop vm-ssh vm-snapshot vm-reset vm-destroy vm-status \
 	shared-mounts-sync shared-mounts-status shared-mounts-check
 
@@ -34,6 +35,12 @@ models-list:
 models-sync:
 	./scripts/models-sync-omlx.sh
 
+models-doctor:
+	./scripts/models-doctor.py
+
+models-prune-incomplete:
+	./scripts/models-doctor.py --delete
+
 model-select:
 	./scripts/model-select.sh
 
@@ -55,6 +62,12 @@ agent-stop:
 agent-restart:
 	./scripts/agent-control.sh restart
 
+agent-pause:
+	./scripts/agent-control.sh pause
+
+agent-switch:
+	AGENT_CONFLICT_POLICY=pause AGENT_PERSIST_SELECTION=1 ./scripts/agent-control.sh start
+
 agent-status:
 	./scripts/agent-control.sh status
 
@@ -66,6 +79,15 @@ agent-shell:
 
 agent-open-dashboard:
 	./scripts/agent-control.sh open-dashboard
+
+dashboard-remote-start:
+	./scripts/dashboard-remote.sh tailscale-start
+
+dashboard-remote-stop:
+	./scripts/dashboard-remote.sh tailscale-stop
+
+dashboard-remote-status:
+	./scripts/dashboard-remote.sh tailscale-status
 
 vm-create:
 	./scripts/vm-create.sh

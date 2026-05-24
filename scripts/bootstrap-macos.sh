@@ -201,6 +201,7 @@ install_apps_and_runtimes() {
 
   brew_install_cask_if_app_missing lm-studio "/Applications/LM Studio.app"
   brew_install_cask_if_app_missing docker-desktop "/Applications/Docker.app"
+  brew_install_cask_if_app_missing tailscale "/Applications/Tailscale.app"
   brew_install_cask_or_manual_admin multipass "/Applications/Multipass.app" "Install Multipass with an admin prompt from a normal terminal:
   brew install --cask multipass
 
@@ -331,12 +332,16 @@ configure_project_env() {
   set_env_value AGENT_RUNTIME "hermes"
   set_env_value SANDBOX_BACKEND "multipass"
   set_env_value MODEL_DIR "${model_dir}"
+  set_env_value OLLAMA_MODELS "${HOME}/.ollama/models"
+  set_env_value MODEL_CLEAN_MIN_AGE_HOURS "1"
   set_env_value OMLX_PORT "8000"
   set_env_value LMSTUDIO_PORT "1234"
   set_env_value MODEL_BIND_HOST "0.0.0.0"
   set_env_value OPENAI_BASE_URL "http://localhost:8000/v1"
   set_env_value ANTHROPIC_BASE_URL "http://localhost:8000"
   set_env_value VM_NAME "omlx-agent-ubuntu"
+  set_env_value HERMES_VM_NAME "omlx-agent-ubuntu"
+  set_env_value OPENCLAW_VM_NAME "omlx-openclaw-ubuntu"
   set_env_value VM_CPUS "4"
   set_env_value VM_MEMORY_MB "8192"
   set_env_value VM_MEMORY "8G"
@@ -359,8 +364,28 @@ configure_project_env() {
   set_env_value DOCKER_GATEWAY_API_PORT "8642"
   set_env_value OPENAI_BASE_URL_DOCKER "http://host.docker.internal:8000/v1"
   set_env_value ANTHROPIC_BASE_URL_DOCKER "http://host.docker.internal:8000"
+  [[ -n "$(env_value TAILSCALE_ENABLED)" ]] || set_env_value TAILSCALE_ENABLED "0"
+  [[ -n "$(env_value TAILSCALE_SERVE_ENABLED)" ]] || set_env_value TAILSCALE_SERVE_ENABLED "0"
+  [[ -n "$(env_value TAILSCALE_SERVE_MODE)" ]] || set_env_value TAILSCALE_SERVE_MODE "serve"
+  [[ -n "$(env_value TAILSCALE_DASHBOARD_TARGET)" ]] || set_env_value TAILSCALE_DASHBOARD_TARGET ""
+  [[ -n "$(env_value TAILSCALE_DASHBOARD_ORIGIN)" ]] || set_env_value TAILSCALE_DASHBOARD_ORIGIN ""
+  [[ -n "$(env_value TAILSCALE_HOSTNAME)" ]] || set_env_value TAILSCALE_HOSTNAME ""
+  [[ -n "$(env_value TAILSCALE_EXTRA_ARGS)" ]] || set_env_value TAILSCALE_EXTRA_ARGS ""
   set_env_value OPENCLAW_IMAGE "ghcr.io/openclaw/openclaw:latest"
+  set_env_value OPENCLAW_PULL_POLICY "latest"
   set_env_value OPENCLAW_CONTROL_PORT "18789"
+  set_env_value OPENCLAW_BRIDGE_PORT "18790"
+  [[ -n "$(env_value OPENCLAW_ALLOW_TAILSCALE_AUTH)" ]] || set_env_value OPENCLAW_ALLOW_TAILSCALE_AUTH "0"
+  [[ -n "$(env_value OPENCLAW_CONTROL_ALLOWED_ORIGINS)" ]] || set_env_value OPENCLAW_CONTROL_ALLOWED_ORIGINS ""
+  if is_placeholder_secret "$(env_value OPENCLAW_GATEWAY_TOKEN)"; then
+    set_env_value OPENCLAW_GATEWAY_TOKEN "$(generate_local_api_key)"
+  fi
+  set_env_value OPENCLAW_DOCKER_NAME "omlx-agent-openclaw-docker"
+  set_env_value OPENCLAW_DOCKER_CONFIG_VOLUME "omlx-agent-openclaw-config"
+  set_env_value OPENCLAW_DOCKER_WORKSPACE_VOLUME "omlx-agent-openclaw-workspace"
+  set_env_value OPENCLAW_DOCKER_AUTH_VOLUME "omlx-agent-openclaw-auth"
+  set_env_value OPENCLAW_OPENAI_BASE_URL_DOCKER "http://host.docker.internal:8000/v1"
+  set_env_value OPENCLAW_OPENAI_BASE_URL_GUEST "http://model-host.internal:8000/v1"
 
   printf 'ok model dir: %s\n' "${model_dir}"
 }
