@@ -116,6 +116,12 @@ stop_omlx() {
   fi
 }
 
+stop_rag() {
+  if [[ -x "${SCRIPT_DIR}/rag-control.sh" ]]; then
+    run_with_timeout "${CLEAN_STEP_TIMEOUT_SECONDS}" "${SCRIPT_DIR}/rag-control.sh" stop >/dev/null 2>&1 || true
+  fi
+}
+
 stop_telegram() {
   run_with_timeout "${CLEAN_STEP_TIMEOUT_SECONDS}" "${SCRIPT_DIR}/telegram-control.sh" stop-host >/dev/null 2>&1 || true
   run_with_timeout "${CLEAN_STEP_TIMEOUT_SECONDS}" env VM_NAME="${HERMES_VM_NAME}" TELEGRAM_TARGET=vm "${SCRIPT_DIR}/telegram-control.sh" stop >/dev/null 2>&1 || true
@@ -146,6 +152,12 @@ print_final_status() {
     echo "omlx=running"
   else
     echo "omlx=stopped"
+  fi
+
+  if [[ -x "${SCRIPT_DIR}/rag-control.sh" ]] && "${SCRIPT_DIR}/rag-control.sh" status 2>/dev/null | grep -q '^rag=running'; then
+    echo "rag=running"
+  else
+    echo "rag=stopped"
   fi
 
   if command -v multipass >/dev/null 2>&1 && multipass info "${HERMES_VM_NAME}" >/dev/null 2>&1; then
@@ -207,6 +219,9 @@ main() {
 
   log "Stopping host model server"
   stop_omlx
+
+  log "Stopping RAG service"
+  stop_rag
 
   log "Stopping Telegram gateways"
   stop_telegram

@@ -1,6 +1,6 @@
 # Release Checklist
 
-## 0.3.0
+## 0.4.0
 
 1. Start from a clean public workspace.
 2. Run host bootstrap and diagnostics:
@@ -20,10 +20,14 @@
    make agent-open-dashboard
    ```
 
-6. If `OBSIDIAN_SHARED_PATH` is configured, verify the shared folder:
+6. If `OBSIDIAN_SHARED_PATH` is configured, verify the shared folder and RAG:
 
    ```bash
    make shared-mounts-check
+   make rag-install
+   make rag-index
+   make rag-search QUERY="release smoke"
+   make rag-status
    ```
 
 7. Scan local model stores before release:
@@ -64,6 +68,12 @@
    make release-check
    ```
 
+   For a full local sandbox matrix before tagging, run:
+
+   ```bash
+   make matrix-e2e
+   ```
+
 11. Confirm no local runtime state is tracked:
 
    ```bash
@@ -75,7 +85,7 @@
 
    ```bash
    git add .
-   git commit -m "Release 0.3.0"
-   git tag v0.3.0
+   git commit -m "Release 0.4.0"
+   git tag v0.4.0
    git push origin HEAD --tags
    ```

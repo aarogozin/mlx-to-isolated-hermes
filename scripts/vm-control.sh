@@ -51,15 +51,24 @@ multipass_ip() {
 
 ensure_model_host_alias() {
   multipass exec "${VM_NAME}" -- sudo bash -lc '
-    if [[ -f /usr/local/sbin/update-model-host-alias ]]; then
+    if [[ -f /usr/local/sbin/update-host-service-aliases ]]; then
+      chmod 0755 /usr/local/sbin/update-host-service-aliases
+      systemctl daemon-reload
+      systemctl enable --now host-service-aliases.service >/dev/null 2>&1 || /usr/local/sbin/update-host-service-aliases || true
+    elif [[ -f /usr/local/sbin/update-model-host-alias ]]; then
       chmod 0755 /usr/local/sbin/update-model-host-alias
       systemctl daemon-reload
       systemctl enable --now model-host-alias.service >/dev/null 2>&1 || /usr/local/sbin/update-model-host-alias || true
+      gateway="$(ip route | awk "/default/ {print \$3; exit}")"
+      if [[ -n "${gateway}" ]] && ! grep -q "[[:space:]]rag-host\\.internal$" /etc/hosts; then
+        printf "%s rag-host.internal\n" "${gateway}" >> /etc/hosts
+      fi
     else
       gateway="$(ip route | awk "/default/ {print \$3; exit}")"
       if [[ -n "${gateway}" ]]; then
-        grep -v "[[:space:]]model-host\\.internal$" /etc/hosts > /etc/hosts.tmp
+        grep -Ev "[[:space:]](model-host|rag-host)\\.internal$" /etc/hosts > /etc/hosts.tmp
         printf "%s model-host.internal\n" "${gateway}" >> /etc/hosts.tmp
+        printf "%s rag-host.internal\n" "${gateway}" >> /etc/hosts.tmp
         mv /etc/hosts.tmp /etc/hosts
       fi
     fi

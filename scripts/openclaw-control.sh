@@ -16,7 +16,12 @@ OVERRIDE_OPENCLAW_DOCKER_CONFIG_VOLUME="${OPENCLAW_DOCKER_CONFIG_VOLUME:-}"
 OVERRIDE_OPENCLAW_DOCKER_WORKSPACE_VOLUME="${OPENCLAW_DOCKER_WORKSPACE_VOLUME:-}"
 OVERRIDE_OPENCLAW_DOCKER_AUTH_VOLUME="${OPENCLAW_DOCKER_AUTH_VOLUME:-}"
 OVERRIDE_OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-}"
+OVERRIDE_OPENCLAW_EXPOSE_BRIDGE_PORT_SET="${OPENCLAW_EXPOSE_BRIDGE_PORT+x}"
+OVERRIDE_OPENCLAW_EXPOSE_BRIDGE_PORT="${OPENCLAW_EXPOSE_BRIDGE_PORT:-}"
 OVERRIDE_MODEL_NAME="${MODEL_NAME:-}"
+OVERRIDE_OBSIDIAN_SHARED_PATH_SET="${OBSIDIAN_SHARED_PATH+x}"
+OVERRIDE_OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
+OVERRIDE_OBSIDIAN_GUEST_PATH="${OBSIDIAN_GUEST_PATH:-}"
 OVERRIDE_TELEGRAM_BOT_TOKEN_SET="${TELEGRAM_BOT_TOKEN+x}"
 OVERRIDE_TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 
@@ -41,6 +46,11 @@ OPENCLAW_DOCKER_WORKSPACE_VOLUME="${OVERRIDE_OPENCLAW_DOCKER_WORKSPACE_VOLUME:-$
 OPENCLAW_DOCKER_AUTH_VOLUME="${OVERRIDE_OPENCLAW_DOCKER_AUTH_VOLUME:-${OPENCLAW_DOCKER_AUTH_VOLUME:-${OPENCLAW_DOCKER_NAME}-auth}}"
 OPENCLAW_CONTROL_PORT="${OVERRIDE_OPENCLAW_CONTROL_PORT:-${OPENCLAW_CONTROL_PORT:-18789}}"
 OPENCLAW_BRIDGE_PORT="${OVERRIDE_OPENCLAW_BRIDGE_PORT:-${OPENCLAW_BRIDGE_PORT:-18790}}"
+if [[ -n "${OVERRIDE_OPENCLAW_EXPOSE_BRIDGE_PORT_SET}" ]]; then
+  OPENCLAW_EXPOSE_BRIDGE_PORT="${OVERRIDE_OPENCLAW_EXPOSE_BRIDGE_PORT}"
+else
+  OPENCLAW_EXPOSE_BRIDGE_PORT="${OPENCLAW_EXPOSE_BRIDGE_PORT:-0}"
+fi
 OPENCLAW_GATEWAY_TOKEN="${OVERRIDE_OPENCLAW_GATEWAY_TOKEN:-${OPENCLAW_GATEWAY_TOKEN:-}}"
 OPENCLAW_GATEWAY_BIND="${OPENCLAW_GATEWAY_BIND:-lan}"
 OPENCLAW_ALLOW_TAILSCALE_AUTH="${OPENCLAW_ALLOW_TAILSCALE_AUTH:-0}"
@@ -48,11 +58,17 @@ OPENCLAW_CONTROL_ALLOWED_ORIGINS="${OPENCLAW_CONTROL_ALLOWED_ORIGINS:-}"
 TAILSCALE_DASHBOARD_ORIGIN="${TAILSCALE_DASHBOARD_ORIGIN:-}"
 OPENCLAW_OPENAI_BASE_URL_DOCKER="${OPENCLAW_OPENAI_BASE_URL_DOCKER:-${OPENAI_BASE_URL_DOCKER:-http://host.docker.internal:8000/v1}}"
 OPENCLAW_OPENAI_BASE_URL_GUEST="${OPENCLAW_OPENAI_BASE_URL_GUEST:-${OPENAI_BASE_URL_GUEST:-http://model-host.internal:8000/v1}}"
+RAG_BASE_URL_DOCKER="${RAG_BASE_URL_DOCKER:-http://rag-host.internal:8765}"
+RAG_BASE_URL_GUEST="${RAG_BASE_URL_GUEST:-http://rag-host.internal:8765}"
 OPENAI_BASE_URL="${OPENAI_BASE_URL:-http://localhost:8000/v1}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 MODEL_NAME="${OVERRIDE_MODEL_NAME:-${MODEL_NAME:-local-model}}"
-OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
-OBSIDIAN_GUEST_PATH="${OBSIDIAN_GUEST_PATH:-/mnt/obsidian}"
+if [[ -n "${OVERRIDE_OBSIDIAN_SHARED_PATH_SET}" ]]; then
+  OBSIDIAN_SHARED_PATH="${OVERRIDE_OBSIDIAN_SHARED_PATH}"
+else
+  OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
+fi
+OBSIDIAN_GUEST_PATH="${OVERRIDE_OBSIDIAN_GUEST_PATH:-${OBSIDIAN_GUEST_PATH:-/mnt/obsidian}}"
 if [[ -n "${OVERRIDE_TELEGRAM_BOT_TOKEN_SET}" ]]; then
   TELEGRAM_BOT_TOKEN="${OVERRIDE_TELEGRAM_BOT_TOKEN}"
 else
@@ -127,6 +143,7 @@ detect_model() {
 
 openclaw_env_args() {
   local base_url="$1"
+  local rag_url="$2"
   printf '%s\0' \
     -e "HOME=/home/node" \
     -e "OPENCLAW_HOME=/home/node" \
@@ -142,6 +159,7 @@ openclaw_env_args() {
     -e "OPENAI_API_KEY=${OPENAI_API_KEY}" \
     -e "OPENAI_BASE_URL=${base_url}" \
     -e "MODEL_NAME=${MODEL_NAME}" \
+    -e "RAG_BASE_URL=${rag_url}" \
     -e "TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}" \
     -e "TELEGRAM_USER_ID=${TELEGRAM_USER_ID}" \
     -e "TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}"
@@ -159,17 +177,19 @@ docker_run_cli() {
   local -a env_args=()
   while IFS= read -r -d '' arg; do
     env_args+=("${arg}")
-  done < <(openclaw_env_args "${OPENCLAW_OPENAI_BASE_URL_DOCKER}")
+  done < <(openclaw_env_args "${OPENCLAW_OPENAI_BASE_URL_DOCKER}" "${RAG_BASE_URL_DOCKER}")
 
   docker run --rm \
     --platform linux/arm64 \
     --add-host host.docker.internal:host-gateway \
     --add-host model-host.internal:host-gateway \
+    --add-host rag-host.internal:host-gateway \
     --entrypoint node \
     "${env_args[@]}" \
     -v "${OPENCLAW_DOCKER_CONFIG_VOLUME}:/home/node/.openclaw" \
     -v "${OPENCLAW_DOCKER_WORKSPACE_VOLUME}:/home/node/.openclaw/workspace" \
     -v "${OPENCLAW_DOCKER_AUTH_VOLUME}:/home/node/.config/openclaw" \
+    -v "${SCRIPT_DIR}/rag-search-bridge.sh:/usr/local/bin/rag-search:ro" \
     "${OPENCLAW_IMAGE}" \
     openclaw.mjs "$@"
 }
@@ -182,8 +202,14 @@ docker_prepare_volumes() {
     -v "${OPENCLAW_DOCKER_CONFIG_VOLUME}:/home/node/.openclaw" \
     -v "${OPENCLAW_DOCKER_WORKSPACE_VOLUME}:/home/node/.openclaw/workspace" \
     -v "${OPENCLAW_DOCKER_AUTH_VOLUME}:/home/node/.config/openclaw" \
+    -v "${SCRIPT_DIR}/rag-search-bridge.sh:/tmp/rag-search:ro" \
     "${OPENCLAW_IMAGE}" \
-    -lc 'mkdir -p /home/node/.openclaw/workspace /home/node/.config/openclaw && chown -R 1000:1000 /home/node/.openclaw /home/node/.config/openclaw'
+    -lc 'mkdir -p /home/node/.openclaw/workspace /home/node/.openclaw/skills/local-rag /home/node/.config/openclaw && cp /tmp/rag-search /home/node/.openclaw/rag-search && chmod 0755 /home/node/.openclaw/rag-search && cat > /home/node/.openclaw/skills/local-rag/SKILL.md <<'"'"'EOF'"'"'
+# Local RAG
+
+Use `rag-search "query"` before answering questions about local notes, Obsidian vault content, project knowledge, or personal documents.
+EOF
+chown -R 1000:1000 /home/node/.openclaw /home/node/.config/openclaw'
 }
 
 openclaw_config_json() {
@@ -269,13 +295,20 @@ docker_create() {
   local -a env_args=()
   while IFS= read -r -d '' arg; do
     env_args+=("${arg}")
-  done < <(openclaw_env_args "${OPENCLAW_OPENAI_BASE_URL_DOCKER}")
+  done < <(openclaw_env_args "${OPENCLAW_OPENAI_BASE_URL_DOCKER}" "${RAG_BASE_URL_DOCKER}")
 
   local -a mount_args=(
     -v "${OPENCLAW_DOCKER_CONFIG_VOLUME}:/home/node/.openclaw"
     -v "${OPENCLAW_DOCKER_WORKSPACE_VOLUME}:/home/node/.openclaw/workspace"
     -v "${OPENCLAW_DOCKER_AUTH_VOLUME}:/home/node/.config/openclaw"
+    -v "${SCRIPT_DIR}/rag-search-bridge.sh:/usr/local/bin/rag-search:ro"
   )
+  local -a port_args=(
+    -p "127.0.0.1:${OPENCLAW_CONTROL_PORT}:18789"
+  )
+  if [[ "${OPENCLAW_EXPOSE_BRIDGE_PORT}" == "1" || "${OPENCLAW_EXPOSE_BRIDGE_PORT}" == "true" ]]; then
+    port_args+=(-p "127.0.0.1:${OPENCLAW_BRIDGE_PORT}:18790")
+  fi
   if [[ -n "${OBSIDIAN_SHARED_PATH}" ]]; then
     local host_path
     host_path="$(normalize_path "${OBSIDIAN_SHARED_PATH}")"
@@ -284,8 +317,24 @@ docker_create() {
   fi
 
   if docker_container_exists; then
-    echo "OpenClaw Docker container already exists: ${OPENCLAW_DOCKER_NAME}"
-    return 0
+    current_extra_hosts="$(docker inspect -f '{{range .HostConfig.ExtraHosts}}{{println .}}{{end}}' "${OPENCLAW_DOCKER_NAME}" 2>/dev/null || true)"
+    current_mounts="$(docker inspect -f '{{range .Mounts}}{{println .Destination}}{{end}}' "${OPENCLAW_DOCKER_NAME}" 2>/dev/null || true)"
+    current_ports="$(docker inspect -f '{{json .HostConfig.PortBindings}}' "${OPENCLAW_DOCKER_NAME}" 2>/dev/null || true)"
+    bridge_binding_ok=1
+    if [[ "${OPENCLAW_EXPOSE_BRIDGE_PORT}" == "1" || "${OPENCLAW_EXPOSE_BRIDGE_PORT}" == "true" ]]; then
+      [[ "${current_ports}" == *"\"18790/tcp\""* && "${current_ports}" == *"\"HostPort\":\"${OPENCLAW_BRIDGE_PORT}\""* ]] || bridge_binding_ok=0
+    else
+      [[ "${current_ports}" != *"\"18790/tcp\""* ]] || bridge_binding_ok=0
+    fi
+    if [[ "${current_extra_hosts}" == *"rag-host.internal:host-gateway"* \
+      && "${current_mounts}" == *"/usr/local/bin/rag-search"* \
+      && "${bridge_binding_ok}" == "1" ]]; then
+      echo "OpenClaw Docker container already exists: ${OPENCLAW_DOCKER_NAME}"
+      return 0
+    fi
+    echo "Recreating OpenClaw Docker container ${OPENCLAW_DOCKER_NAME} because RAG networking/tooling or port bindings changed."
+    docker stop "${OPENCLAW_DOCKER_NAME}" >/dev/null 2>&1 || true
+    docker rm "${OPENCLAW_DOCKER_NAME}" >/dev/null
   fi
 
   docker create \
@@ -295,10 +344,10 @@ docker_create() {
     --cpus "${DOCKER_CPUS:-2}" \
     --memory "${DOCKER_MEMORY:-4g}" \
     --shm-size "${DOCKER_SHM_SIZE:-1g}" \
-    -p "127.0.0.1:${OPENCLAW_CONTROL_PORT}:18789" \
-    -p "127.0.0.1:${OPENCLAW_BRIDGE_PORT}:18790" \
+    "${port_args[@]}" \
     --add-host host.docker.internal:host-gateway \
     --add-host model-host.internal:host-gateway \
+    --add-host rag-host.internal:host-gateway \
     --cap-drop NET_RAW \
     --cap-drop NET_ADMIN \
     --security-opt no-new-privileges:true \
@@ -358,15 +407,24 @@ vm_running_state() {
 
 ensure_vm_model_host_alias() {
   vm_exec_root '
-    if [[ -f /usr/local/sbin/update-model-host-alias ]]; then
+    if [[ -f /usr/local/sbin/update-host-service-aliases ]]; then
+      chmod 0755 /usr/local/sbin/update-host-service-aliases
+      systemctl daemon-reload
+      systemctl enable --now host-service-aliases.service >/dev/null 2>&1 || /usr/local/sbin/update-host-service-aliases || true
+    elif [[ -f /usr/local/sbin/update-model-host-alias ]]; then
       chmod 0755 /usr/local/sbin/update-model-host-alias
       systemctl daemon-reload
       systemctl enable --now model-host-alias.service >/dev/null 2>&1 || /usr/local/sbin/update-model-host-alias || true
+      gateway="$(ip route | awk "/default/ {print \$3; exit}")"
+      if [[ -n "${gateway}" ]] && ! grep -q "[[:space:]]rag-host\\.internal$" /etc/hosts; then
+        printf "%s rag-host.internal\n" "${gateway}" >> /etc/hosts
+      fi
     else
       gateway="$(ip route | awk "/default/ {print \$3; exit}")"
       if [[ -n "${gateway}" ]]; then
-        grep -v "[[:space:]]model-host\\.internal$" /etc/hosts > /etc/hosts.tmp
+        grep -Ev "[[:space:]](model-host|rag-host)\\.internal$" /etc/hosts > /etc/hosts.tmp
         printf "%s model-host.internal\n" "${gateway}" >> /etc/hosts.tmp
+        printf "%s rag-host.internal\n" "${gateway}" >> /etc/hosts.tmp
         mv /etc/hosts.tmp /etc/hosts
       fi
     fi
@@ -419,6 +477,7 @@ vm_configure() {
     OPENAI_API_KEY="${OPENAI_API_KEY}" \
     CUSTOM_API_KEY="${OPENAI_API_KEY}" \
     OPENAI_BASE_URL="${OPENCLAW_OPENAI_BASE_URL_GUEST}" \
+    RAG_BASE_URL="${RAG_BASE_URL_GUEST}" \
     MODEL_NAME="${MODEL_NAME}" \
     TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN}" \
     TELEGRAM_USER_ID="${TELEGRAM_USER_ID}" \
@@ -438,12 +497,21 @@ OPENCLAW_DISABLE_BONJOUR=1
 OPENAI_API_KEY=${OPENAI_API_KEY}
 CUSTOM_API_KEY=${OPENAI_API_KEY}
 OPENAI_BASE_URL=${OPENCLAW_OPENAI_BASE_URL_GUEST}
+RAG_BASE_URL=${RAG_BASE_URL_GUEST}
 MODEL_NAME=${MODEL_NAME}
 TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
 TELEGRAM_USER_ID=${TELEGRAM_USER_ID}
 TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}
 EOF
 chmod 600 ~/.openclaw/.env"
+
+  multipass transfer "${SCRIPT_DIR}/rag-search-bridge.sh" "${VM_NAME}:/tmp/rag-search"
+  vm_exec_root "install -m 0755 -o '${VM_SSH_USER}' -g '${VM_SSH_USER}' /tmp/rag-search '/home/${VM_SSH_USER}/.local/bin/rag-search'"
+  vm_exec_agent "mkdir -p ~/.openclaw/skills/local-rag && cat > ~/.openclaw/skills/local-rag/SKILL.md <<'EOF'
+# Local RAG
+
+Use \`rag-search \"query\"\` before answering questions about local notes, Obsidian vault content, project knowledge, or personal documents.
+EOF"
 
   vm_exec_agent "grep -Fqx 'export PATH=\"\$HOME/.npm-global/bin:\$HOME/.local/bin:\$PATH\"' ~/.profile || printf '\\nexport PATH=\"\$HOME/.npm-global/bin:\$HOME/.local/bin:\$PATH\"\\n' >> ~/.profile"
 }
@@ -476,7 +544,7 @@ vm_stop_tunnel() {
 }
 
 vm_start() {
-  vm_running_state || "${SCRIPT_DIR}/vm-control.sh" start
+  vm_running_state || VM_NAME="${VM_NAME}" AGENT_RUNTIME=openclaw "${SCRIPT_DIR}/vm-control.sh" start
   vm_configure
   vm_exec_agent "mkdir -p ~/.openclaw/logs; if [[ -f ~/.openclaw/gateway.pid ]] && kill -0 \"\$(cat ~/.openclaw/gateway.pid)\" >/dev/null 2>&1 && ps -p \"\$(cat ~/.openclaw/gateway.pid)\" -o command= | grep -Eq '[o]penclaw|[n]ode .*openclaw.mjs'; then exit 0; fi; set -a; . ~/.openclaw/.env; set +a; nohup openclaw gateway run --bind '${OPENCLAW_GATEWAY_BIND}' --port '${OPENCLAW_CONTROL_PORT}' --auth token --token '${OPENCLAW_GATEWAY_TOKEN}' > ~/.openclaw/logs/gateway.log 2>&1 & echo \$! > ~/.openclaw/gateway.pid"
   vm_start_tunnel
@@ -545,7 +613,7 @@ case "${ACTION}:${TARGET}" in
     fi
     exec docker exec "${tty_args[@]}" "${OPENCLAW_DOCKER_NAME}" /bin/bash
     ;;
-  shell:multipass|shell:vm) "${SCRIPT_DIR}/vm-control.sh" ssh ;;
+  shell:multipass|shell:vm) VM_NAME="${VM_NAME}" AGENT_RUNTIME=openclaw "${SCRIPT_DIR}/vm-control.sh" ssh ;;
   open-dashboard:docker|open-dashboard:multipass|open-dashboard:vm)
     print_dashboard_access
     if command -v open >/dev/null 2>&1; then

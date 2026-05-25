@@ -9,6 +9,8 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${PROJECT_ROOT}/.env"
 
 OVERRIDE_VM_NAME="${VM_NAME:-}"
+OVERRIDE_TELEGRAM_BOT_TOKEN_SET="${TELEGRAM_BOT_TOKEN+x}"
+OVERRIDE_TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -24,10 +26,15 @@ VM_NAME="${OVERRIDE_VM_NAME:-${HERMES_VM_NAME:-${VM_NAME:-omlx-agent-ubuntu}}}"
 VM_SSH_USER="${VM_SSH_USER:-agent}"
 OPENAI_BASE_URL_GUEST="${OPENAI_BASE_URL_GUEST:-http://model-host.internal:8000/v1}"
 ANTHROPIC_BASE_URL_GUEST="${ANTHROPIC_BASE_URL_GUEST:-http://model-host.internal:8000}"
+RAG_BASE_URL_GUEST="${RAG_BASE_URL_GUEST:-http://rag-host.internal:8765}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY}}"
 MODEL_NAME="${MODEL_NAME:-local-model}"
-TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+if [[ -n "${OVERRIDE_TELEGRAM_BOT_TOKEN_SET}" ]]; then
+  TELEGRAM_BOT_TOKEN="${OVERRIDE_TELEGRAM_BOT_TOKEN}"
+else
+  TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+fi
 TELEGRAM_USER_ID="${TELEGRAM_USER_ID:-}"
 TELEGRAM_ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS:-}"
 TELEGRAM_GROUP_ALLOWED_USERS="${TELEGRAM_GROUP_ALLOWED_USERS:-}"
@@ -61,6 +68,7 @@ set -euo pipefail
 AGENT_USER="${AGENT_USER:-agent}"
 OPENAI_BASE_URL="${OPENAI_BASE_URL:-http://model-host.internal:8000/v1}"
 ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://model-host.internal:8000}"
+RAG_BASE_URL="${RAG_BASE_URL:-http://rag-host.internal:8765}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY}}"
 MODEL_NAME="${MODEL_NAME:-local-model}"
@@ -85,6 +93,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
     AGENT_USER="${AGENT_USER}" \
     OPENAI_BASE_URL="${OPENAI_BASE_URL}" \
     ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL}" \
+    RAG_BASE_URL="${RAG_BASE_URL}" \
     OPENAI_API_KEY="${OPENAI_API_KEY}" \
     ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
     MODEL_NAME="${MODEL_NAME}" \
@@ -232,6 +241,7 @@ fi
 cat > "/home/${AGENT_USER}/.hermes/.env" <<ENVEOF
 OPENAI_BASE_URL=${OPENAI_BASE_URL}
 ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}
+RAG_BASE_URL=${RAG_BASE_URL}
 OPENAI_API_KEY=${OPENAI_API_KEY}
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 MODEL_NAME=${detected_model}
@@ -252,6 +262,13 @@ append_env_if_set TELEGRAM_GROUP_ALLOWED_USERS "${TELEGRAM_GROUP_ALLOWED_USERS}"
 append_env_if_set TELEGRAM_GROUP_ALLOWED_CHATS "${TELEGRAM_GROUP_ALLOWED_CHATS}"
 append_env_if_set GATEWAY_ALLOWED_USERS "${GATEWAY_ALLOWED_USERS}"
 append_env_if_set GATEWAY_ALLOW_ALL_USERS "${GATEWAY_ALLOW_ALL_USERS}"
+
+install -d -o "${AGENT_USER}" -g "${AGENT_USER}" "/home/${AGENT_USER}/.hermes/skills/local-rag"
+cat > "/home/${AGENT_USER}/.hermes/skills/local-rag/SKILL.md" <<'SKILLEOF'
+# Local RAG
+
+Use `rag-search "query"` before answering questions about local notes, Obsidian vault content, project knowledge, or personal documents.
+SKILLEOF
 
 cat > "/home/${AGENT_USER}/.hermes/config.yaml" <<CFGEOF
 model:
@@ -276,6 +293,7 @@ cat > "/home/${AGENT_USER}/.profile.d-local-ai" <<PROFILEEOF
 export PATH="\$HOME/.local/bin:\$PATH"
 export OPENAI_BASE_URL="${OPENAI_BASE_URL}"
 export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL}"
+export RAG_BASE_URL="${RAG_BASE_URL}"
 export OPENAI_API_KEY="${OPENAI_API_KEY}"
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}"
 export MODEL_NAME="${detected_model}"
@@ -304,6 +322,7 @@ INSTALLER
     AGENT_USER="${VM_SSH_USER}" \
     OPENAI_BASE_URL="${OPENAI_BASE_URL_GUEST}" \
     ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL_GUEST}" \
+    RAG_BASE_URL="${RAG_BASE_URL_GUEST}" \
     OPENAI_API_KEY="${OPENAI_API_KEY}" \
     ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
     MODEL_NAME="${MODEL_NAME}" \
@@ -321,3 +340,6 @@ INSTALLER
 }
 
 install_vm
+
+multipass transfer "${SCRIPT_DIR}/rag-search-bridge.sh" "${VM_NAME}:/tmp/rag-search"
+multipass exec "${VM_NAME}" -- sudo install -m 0755 -o "${VM_SSH_USER}" -g "${VM_SSH_USER}" /tmp/rag-search "/home/${VM_SSH_USER}/.local/bin/rag-search"

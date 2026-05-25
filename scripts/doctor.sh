@@ -183,6 +183,27 @@ check_tailscale() {
   fi
 }
 
+check_rag() {
+  local enabled="${RAG_ENABLED:-1}"
+
+  if [[ "${enabled}" != "1" && "${enabled}" != "true" && "${enabled}" != "yes" ]]; then
+    pass "RAG: disabled"
+    return
+  fi
+
+  if [[ ! -x "${SCRIPT_DIR}/rag-control.sh" ]]; then
+    fail "RAG control script missing or not executable"
+    return
+  fi
+
+  if output="$("${SCRIPT_DIR}/rag-control.sh" doctor 2>&1)"; then
+    pass "RAG doctor"
+  else
+    warn "RAG doctor needs attention; run make rag-install and set OBSIDIAN_SHARED_PATH"
+    printf '%s\n' "${output}" | sed 's/^/     /'
+  fi
+}
+
 main() {
   load_env
   check_platform
@@ -204,6 +225,7 @@ main() {
   check_docker
   check_model_api
   check_tailscale
+  check_rag
 
   printf '\nDoctor finished: %s failure(s), %s warning(s)\n' "${failures}" "${warnings}"
 

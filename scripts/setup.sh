@@ -332,6 +332,9 @@ configure_credentials() {
 
 # ── Step 5: Model selection ───────────────────────────────────────────────────
 SELECTED_MODEL=""
+RAG_SELECTED=0
+RAG_SMOKE_QUERY=""
+RAG_SEARCH_PREVIEW=""
 
 configure_model() {
   step "Model selection"
@@ -375,7 +378,69 @@ configure_model() {
   ok "Model: ${SELECTED_MODEL}"
 }
 
-# ── Step 6: Start oMLX ────────────────────────────────────────────────────────
+# ── Step 6: Optional local RAG ────────────────────────────────────────────────
+configure_rag() {
+  step "Local RAG"
+  printf "  ${DIM}RAG indexes your Obsidian/text folder on the host and exposes it to ${AGENT_RUNTIME} through rag-search.${RESET}\n"
+  printf "  ${DIM}It is optional, local-only, and can be rebuilt from source notes at any time.${RESET}\n"
+
+  local idx
+  idx="$(choose_menu "Do you want to connect and verify RAG for this deployment?" \
+    "Yes — install/index/start RAG and verify it after agent deploy" \
+    "Skip for now — keep RAG disabled for this setup")"
+
+  if [[ "${idx}" -ne 0 ]]; then
+    RAG_SELECTED=0
+    env_put RAG_ENABLED "0"
+    info "RAG skipped for this setup"
+    return
+  fi
+
+  RAG_SELECTED=1
+  env_put RAG_ENABLED "1"
+
+  local source_path
+  source_path="$(env_get RAG_SOURCE_PATH)"
+  if [[ -z "${source_path}" || "${source_path}" == '${OBSIDIAN_SHARED_PATH}' || "${source_path}" == '${OBSIDIAN_SHARED_PATH:-}' ]]; then
+    source_path="$(env_get OBSIDIAN_SHARED_PATH)"
+  fi
+
+  if [[ -z "${source_path}" ]]; then
+    printf "  ${DIM}Point this at your Obsidian vault or another local notes/documents folder.${RESET}\n"
+    source_path="$(prompt "RAG source path")"
+  fi
+
+  [[ -n "${source_path}" ]] || die "RAG was selected but no source path was provided."
+  source_path="${source_path/#\~/${HOME}}"
+  [[ -d "${source_path}" ]] || die "RAG source path does not exist: ${source_path}"
+
+  env_put OBSIDIAN_SHARED_PATH "${source_path}"
+  env_put RAG_SOURCE_PATH "${source_path}"
+  local rag_port
+  rag_port="$(env_get RAG_PORT)"; rag_port="${rag_port:-8765}"
+  env_put RAG_PORT "${rag_port}"
+  env_put RAG_BASE_URL "http://127.0.0.1:${rag_port}"
+  env_put RAG_BASE_URL_GUEST "http://rag-host.internal:${rag_port}"
+  env_put RAG_BASE_URL_DOCKER "http://rag-host.internal:${rag_port}"
+
+  RAG_SMOKE_QUERY="$(prompt "RAG smoke-test query" "${SELECTED_MODEL:-local agent}")"
+
+  substep "Installing RAG dependencies..."
+  "${SCRIPT_DIR}/rag-control.sh" install
+
+  substep "Indexing local knowledge source..."
+  "${SCRIPT_DIR}/rag-control.sh" index
+
+  substep "Starting host RAG service..."
+  "${SCRIPT_DIR}/rag-control.sh" start
+
+  substep "Verifying host RAG search..."
+  RAG_SEARCH_PREVIEW="$("${SCRIPT_DIR}/rag-control.sh" search "${RAG_SMOKE_QUERY}" | sed -n '1,12p')"
+  printf '%s\n' "${RAG_SEARCH_PREVIEW}" | sed 's/^/     /'
+  ok "RAG host search works"
+}
+
+# ── Step 7: Start oMLX ────────────────────────────────────────────────────────
 start_omlx() {
   step "Starting oMLX model server (background, launchd)"
   if [[ "${OMLX_RUNNING}" -eq 1 ]]; then
@@ -387,7 +452,7 @@ start_omlx() {
   ok "oMLX started"
 }
 
-# ── Step 7: Create sandbox ────────────────────────────────────────────────────
+# ── Step 8: Create sandbox ────────────────────────────────────────────────────
 create_sandbox() {
   step "Starting selected agent stack"
   if ! AGENT_RUNTIME="${AGENT_RUNTIME}" SANDBOX_BACKEND="${BACKEND}" AGENT_CONFLICT_POLICY=prompt "${SCRIPT_DIR}/agent-control.sh" start; then
@@ -398,7 +463,58 @@ create_sandbox() {
   ok "Agent stack ready"
 }
 
-# ── Step 8: Dashboard ─────────────────────────────────────────────────────────
+verify_rag_after_deploy() {
+  [[ "${RAG_SELECTED}" -eq 1 ]] || return 0
+
+  step "Verifying RAG inside sandbox"
+  local query="${RAG_SMOKE_QUERY:-local knowledge}"
+  local rag_port
+  rag_port="$(env_get RAG_PORT)"; rag_port="${rag_port:-8765}"
+  local output=""
+  case "${BACKEND}" in
+    docker)
+      if [[ "${AGENT_RUNTIME}" == "openclaw" ]]; then
+        local container
+        container="$(env_get OPENCLAW_DOCKER_NAME)"; container="${container:-omlx-agent-openclaw-docker}"
+        output="$(docker exec \
+          -e "RAG_BASE_URL=http://rag-host.internal:${rag_port}" \
+          -e "RAG_QUERY=${query}" \
+          "${container}" sh -lc 'rag-search "$RAG_QUERY"' 2>&1 || true)"
+      else
+        local container
+        container="$(env_get DOCKER_NAME)"; container="${container:-omlx-agent-docker}"
+        output="$(docker exec \
+          -e "RAG_BASE_URL=http://rag-host.internal:${rag_port}" \
+          -e "RAG_QUERY=${query}" \
+          "${container}" /bin/bash -lc 'export PATH=/opt/data/.local/bin:$PATH; set -a; . /opt/data/.env; set +a; RAG_BASE_URL="http://rag-host.internal:'"${rag_port}"'" rag-search "$RAG_QUERY"' 2>&1 || true)"
+      fi
+      ;;
+    multipass)
+      local vm_name
+      local vm_user
+      if [[ "${AGENT_RUNTIME}" == "openclaw" ]]; then
+        vm_name="$(env_get OPENCLAW_VM_NAME)"; vm_name="${vm_name:-omlx-openclaw-ubuntu}"
+      else
+        vm_name="$(env_get HERMES_VM_NAME)"; vm_name="${vm_name:-$(env_get VM_NAME)}"; vm_name="${vm_name:-omlx-agent-ubuntu}"
+      fi
+      vm_user="$(env_get VM_SSH_USER)"; vm_user="${vm_user:-agent}"
+      output="$(multipass exec "${vm_name}" -- sudo -Hu "${vm_user}" env \
+        "RAG_BASE_URL=http://rag-host.internal:${rag_port}" \
+        "RAG_QUERY=${query}" \
+        bash -lc 'export PATH="$HOME/.local/bin:$PATH"; rag-search "$RAG_QUERY"' 2>&1 || true)"
+      ;;
+  esac
+
+  if printf '%s\n' "${output}" | grep -q '^RAG results for:'; then
+    printf '%s\n' "${output}" | sed -n '1,12p' | sed 's/^/     /'
+    ok "RAG is reachable from ${AGENT_RUNTIME}/${BACKEND}"
+  else
+    printf '%s\n' "${output}" | sed -n '1,80p' | sed 's/^/     /'
+    die "RAG host service works, but ${AGENT_RUNTIME}/${BACKEND} could not use rag-search."
+  fi
+}
+
+# ── Step 9: Dashboard ─────────────────────────────────────────────────────────
 DASHBOARD_URL=""
 
 start_dashboard() {
@@ -423,7 +539,7 @@ start_dashboard() {
   ok "UI: ${DASHBOARD_URL}"
 }
 
-# ── Step 9: Telegram gateway ──────────────────────────────────────────────────
+# ── Step 10: Telegram gateway ─────────────────────────────────────────────────
 TELEGRAM_STARTED=0
 
 start_telegram() {
@@ -437,7 +553,7 @@ start_telegram() {
   ok "Telegram configured"
 }
 
-# ── Step 10: Verify Telegram connectivity ─────────────────────────────────────
+# ── Step 11: Verify Telegram connectivity ─────────────────────────────────────
 TELEGRAM_REACHABLE=0
 TELEGRAM_BOT_USERNAME=""
 
@@ -456,7 +572,7 @@ verify_telegram() {
   fi
 }
 
-# ── Step 11: Final summary ────────────────────────────────────────────────────
+# ── Step 12: Final summary ────────────────────────────────────────────────────
 print_summary() {
   local model; model="$(env_get MODEL_NAME)"; model="${model:-unknown}"
   local base_url; base_url="$(env_get OPENAI_BASE_URL)"; base_url="${base_url:-http://localhost:8000/v1}"
@@ -478,6 +594,11 @@ DONE
   printf "  ${BOLD}Backend:${RESET}    %s\n"   "${BACKEND}"
   printf "  ${BOLD}Model:${RESET}      %s\n"   "${model}"
   printf "  ${BOLD}oMLX API:${RESET}   %s\n"   "${base_url}"
+  if [[ "${RAG_SELECTED}" -eq 1 ]]; then
+    printf "  ${BOLD}RAG:${RESET}        %s\n"   "enabled at http://127.0.0.1:$(env_get RAG_PORT)"
+  else
+    printf "  ${BOLD}RAG:${RESET}        %s\n"   "disabled for this setup"
+  fi
   printf "\n"
 
   # ── Dashboard ──
@@ -521,6 +642,7 @@ DONE
   printf "  ${DIM}  make agent-open-dashboard ${RESET}# open Dashboard in browser\n"
   printf "  ${DIM}  make doctor               ${RESET}# full system health check\n"
   printf "  ${DIM}  make model-select         ${RESET}# switch local model\n"
+  printf "  ${DIM}  make rag-search QUERY=\"...\" ${RESET}# query local RAG\n"
   if [[ "${BACKEND}" != "docker" ]]; then
     printf "  ${DIM}  make vm-ssh               ${RESET}# SSH into the agent VM\n"
     printf "  ${DIM}  make vm-status            ${RESET}# show VM status and IP\n"
@@ -552,8 +674,10 @@ main() {
   choose_backend
   configure_credentials
   configure_model
+  configure_rag
   start_omlx
   create_sandbox
+  verify_rag_after_deploy
   start_dashboard
   start_telegram
   verify_telegram

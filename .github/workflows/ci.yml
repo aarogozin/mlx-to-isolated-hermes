@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   shell:
-    name: Shell checks
+    name: Static and mock checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,3 +26,40 @@ jobs:
 
       - name: Shared folder mock tests
         run: scripts/test-shared-mounts-mock.sh
+
+      - name: Python syntax and RAG unit tests
+        run: |
+          python3 -m py_compile scripts/models-doctor.py scripts/rag.py
+          RAG_EMBEDDING_BACKEND=hash scripts/test-rag-unit.sh
+
+      - name: Release check without host-only e2e
+        run: |
+          SKIP_HOST_DOCTOR=1 \
+          SKIP_RAG_E2E=1 \
+          SKIP_VM_E2E=1 \
+          SKIP_DOCKER_E2E=1 \
+          RAG_EMBEDDING_BACKEND=hash \
+            scripts/release-check.sh
+
+      - name: Synthetic RAG matrix dry-run
+        run: |
+          RAG_EMBEDDING_BACKEND=hash \
+          MATRIX_MODES=" " \
+          MATRIX_CLEAN_MODE=none \
+          MATRIX_REPORT_DIR=.runtime/matrix-e2e/ci-synthetic \
+            scripts/matrix-e2e.sh
+
+      - name: OpenClaw Docker command mock
+        run: scripts/test-openclaw-docker-command-mock.sh
+
+  docker:
+    name: Docker checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker daemon
+        run: docker version
+
+      - name: Docker shared folder smoke
+        run: scripts/test-docker-shared-mount.sh

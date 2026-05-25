@@ -9,6 +9,9 @@ STATE_DIR="${PROJECT_ROOT}/.vm"
 
 OVERRIDE_AGENT_RUNTIME="${AGENT_RUNTIME:-}"
 OVERRIDE_VM_NAME="${VM_NAME:-}"
+OVERRIDE_OBSIDIAN_SHARED_PATH_SET="${OBSIDIAN_SHARED_PATH+x}"
+OVERRIDE_OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
+OVERRIDE_OBSIDIAN_GUEST_PATH="${OBSIDIAN_GUEST_PATH:-}"
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -38,8 +41,12 @@ VM_SSH_USER="${VM_SSH_USER:-agent}"
 VM_SSH_KEY="${VM_SSH_KEY:-${HOME}/.ssh/omlx_agent_vm_ed25519}"
 USER_SSH_PUBLIC_KEY="${USER_SSH_PUBLIC_KEY:-${HOME}/.ssh/id_ed25519.pub}"
 VM_SNAPSHOT_NAME="${VM_SNAPSHOT_NAME:-clean-agent-base}"
-OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
-OBSIDIAN_GUEST_PATH="${OBSIDIAN_GUEST_PATH:-/mnt/obsidian}"
+if [[ -n "${OVERRIDE_OBSIDIAN_SHARED_PATH_SET}" ]]; then
+  OBSIDIAN_SHARED_PATH="${OVERRIDE_OBSIDIAN_SHARED_PATH}"
+else
+  OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
+fi
+OBSIDIAN_GUEST_PATH="${OVERRIDE_OBSIDIAN_GUEST_PATH:-${OBSIDIAN_GUEST_PATH:-/mnt/obsidian}}"
 SHARED_MOUNTS_REQUIRED="${SHARED_MOUNTS_REQUIRED:-0}"
 UBUNTU_MULTIPASS_IMAGE="${UBUNTU_MULTIPASS_IMAGE:-24.04}"
 MULTIPASS_LAUNCH_TIMEOUT="${MULTIPASS_LAUNCH_TIMEOUT:-900}"
@@ -174,7 +181,7 @@ packages:
   - python3-pip
   - python3-venv
 write_files:
-  - path: /usr/local/sbin/update-model-host-alias
+  - path: /usr/local/sbin/update-host-service-aliases
     permissions: '0755'
     content: |
       #!/usr/bin/env bash
@@ -183,20 +190,40 @@ write_files:
       if [[ -z "\${gateway}" ]]; then
         exit 0
       fi
-      grep -v '[[:space:]]model-host\.internal$' /etc/hosts > /etc/hosts.tmp
+      grep -Ev '[[:space:]](model-host|rag-host)\.internal$' /etc/hosts > /etc/hosts.tmp
       printf '%s model-host.internal\n' "\${gateway}" >> /etc/hosts.tmp
+      printf '%s rag-host.internal\n' "\${gateway}" >> /etc/hosts.tmp
       mv /etc/hosts.tmp /etc/hosts
-  - path: /etc/systemd/system/model-host-alias.service
+  - path: /usr/local/sbin/update-model-host-alias
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      exec /usr/local/sbin/update-host-service-aliases
+  - path: /etc/systemd/system/host-service-aliases.service
     permissions: '0644'
     content: |
       [Unit]
-      Description=Map model-host.internal to the default gateway
+      Description=Map host service aliases to the default gateway
       After=network-online.target
       Wants=network-online.target
 
       [Service]
       Type=oneshot
-      ExecStart=/usr/local/sbin/update-model-host-alias
+      ExecStart=/usr/local/sbin/update-host-service-aliases
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/model-host-alias.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Compatibility alias for host service mapping
+      After=host-service-aliases.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/update-host-service-aliases
       RemainAfterExit=yes
 
       [Install]
@@ -206,15 +233,17 @@ write_files:
     content: |
       export OPENAI_BASE_URL=\${OPENAI_BASE_URL:-http://model-host.internal:8000/v1}
       export ANTHROPIC_BASE_URL=\${ANTHROPIC_BASE_URL:-http://model-host.internal:8000}
+      export RAG_BASE_URL=\${RAG_BASE_URL:-http://rag-host.internal:8765}
       export OPENAI_API_KEY=\${OPENAI_API_KEY:-${OPENAI_API_KEY}}
       export ANTHROPIC_API_KEY=\${ANTHROPIC_API_KEY:-${ANTHROPIC_API_KEY}}
 runcmd:
   - mkdir -p /mnt/obsidian
   - mkdir -p /home/${VM_SSH_USER}/workspace /home/${VM_SSH_USER}/.hermes /home/${VM_SSH_USER}/.local/bin
   - chown -R ${VM_SSH_USER}:${VM_SSH_USER} /home/${VM_SSH_USER}/workspace /home/${VM_SSH_USER}/.hermes /home/${VM_SSH_USER}/.local
-  - chmod 0755 /usr/local/sbin/update-model-host-alias
-  - chmod 0644 /etc/systemd/system/model-host-alias.service /etc/profile.d/local-model-server.sh
+  - chmod 0755 /usr/local/sbin/update-host-service-aliases /usr/local/sbin/update-model-host-alias
+  - chmod 0644 /etc/systemd/system/host-service-aliases.service /etc/systemd/system/model-host-alias.service /etc/profile.d/local-model-server.sh
   - systemctl daemon-reload
+  - systemctl enable --now host-service-aliases.service
   - systemctl enable --now model-host-alias.service
   - systemctl enable --now ssh
 EOF

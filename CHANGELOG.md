@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.4.0 — 2026-05-25
+
+Local RAG preview for Obsidian-backed agent knowledge.
+
+- Add host-side LanceDB RAG index and FastAPI search service under `.runtime/rag`.
+- Add manual incremental indexing for Obsidian/text files with metadata, headings, tags, and wikilinks.
+- Add `rag-*` Make targets for install, index, search, service lifecycle, and diagnostics.
+- Add interactive `make setup` RAG opt-in with host indexing and sandbox `rag-search` smoke verification.
+- Add local `make matrix-e2e` to smoke Hermes/OpenClaw across Docker/Multipass with shared host RAG.
+- Expose `rag-host.internal` to Multipass and Docker sandboxes, parallel to `model-host.internal`.
+- Install a small `rag-search` bridge into Hermes/OpenClaw environments so agents can query local notes explicitly.
+- Add lightweight RAG docs, unit tests, and release-check hooks.
+
 ## 0.3.0 — 2026-05-24
 
 OpenClaw runtime hardening and model artifact cleanup.

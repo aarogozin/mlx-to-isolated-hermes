@@ -1,7 +1,8 @@
 SHELL := /bin/bash
 
-.PHONY: bootstrap setup doctor clean-all release-check \
+.PHONY: bootstrap setup doctor clean-all release-check ci-check matrix-e2e \
 	models-search models-list models-sync models-doctor models-prune-incomplete model-select model-start-bg model-stop-bg model-check \
+	rag-install rag-index rag-search rag-start rag-stop rag-status rag-doctor \
 	agent-start agent-stop agent-restart agent-pause agent-switch agent-status agent-logs agent-shell agent-open-dashboard \
 	dashboard-remote-start dashboard-remote-stop dashboard-remote-status \
 	vm-create vm-start vm-stop vm-ssh vm-snapshot vm-reset vm-destroy vm-status \
@@ -21,6 +22,14 @@ clean-all:
 
 release-check:
 	./scripts/release-check.sh
+
+ci-check:
+	SKIP_HOST_DOCTOR=1 SKIP_RAG_E2E=1 SKIP_VM_E2E=1 SKIP_DOCKER_E2E=1 ./scripts/release-check.sh
+	RAG_EMBEDDING_BACKEND=hash MATRIX_MODES=" " MATRIX_CLEAN_MODE=none MATRIX_REPORT_DIR=.runtime/matrix-e2e/ci-synthetic ./scripts/matrix-e2e.sh
+	./scripts/test-openclaw-docker-command-mock.sh
+
+matrix-e2e:
+	./scripts/matrix-e2e.sh
 
 models-search:
 	@if [ -x "$$HOME/.lmstudio/bin/lms" ]; then \
@@ -52,6 +61,28 @@ model-stop-bg:
 
 model-check:
 	./scripts/doctor.sh --model-required
+
+rag-install:
+	./scripts/rag-control.sh install
+
+rag-index:
+	./scripts/rag-control.sh index
+
+rag-search:
+	@test -n "$(QUERY)" || (echo 'Usage: make rag-search QUERY="your query"' >&2; exit 2)
+	./scripts/rag-control.sh search "$(QUERY)"
+
+rag-start:
+	./scripts/rag-control.sh start
+
+rag-stop:
+	./scripts/rag-control.sh stop
+
+rag-status:
+	./scripts/rag-control.sh status
+
+rag-doctor:
+	./scripts/rag-control.sh doctor
 
 agent-start:
 	./scripts/agent-control.sh start

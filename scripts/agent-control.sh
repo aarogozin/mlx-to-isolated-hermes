@@ -8,6 +8,10 @@ ENV_FILE="${PROJECT_ROOT}/.env"
 OVERRIDE_AGENT_RUNTIME="${AGENT_RUNTIME:-}"
 OVERRIDE_SANDBOX_BACKEND="${SANDBOX_BACKEND:-}"
 OVERRIDE_VM_NAME="${VM_NAME:-}"
+OVERRIDE_OBSIDIAN_SHARED_PATH_SET="${OBSIDIAN_SHARED_PATH+x}"
+OVERRIDE_OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
+OVERRIDE_TELEGRAM_BOT_TOKEN_SET="${TELEGRAM_BOT_TOKEN+x}"
+OVERRIDE_TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -19,7 +23,16 @@ fi
 ACTION="${1:-status}"
 AGENT_RUNTIME="${OVERRIDE_AGENT_RUNTIME:-${AGENT_RUNTIME:-hermes}}"
 SANDBOX_BACKEND="${OVERRIDE_SANDBOX_BACKEND:-${SANDBOX_BACKEND:-multipass}}"
-TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+if [[ -n "${OVERRIDE_OBSIDIAN_SHARED_PATH_SET}" ]]; then
+  OBSIDIAN_SHARED_PATH="${OVERRIDE_OBSIDIAN_SHARED_PATH}"
+else
+  OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
+fi
+if [[ -n "${OVERRIDE_TELEGRAM_BOT_TOKEN_SET}" ]]; then
+  TELEGRAM_BOT_TOKEN="${OVERRIDE_TELEGRAM_BOT_TOKEN}"
+else
+  TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+fi
 TELEGRAM_SWITCH_GRACE_SECONDS="${TELEGRAM_SWITCH_GRACE_SECONDS:-3}"
 AGENT_CONFLICT_POLICY="${AGENT_CONFLICT_POLICY:-fail}"
 AGENT_PERSIST_SELECTION="${AGENT_PERSIST_SELECTION:-0}"
@@ -95,7 +108,7 @@ ensure_vm() {
   if vm_exists "${name}"; then
     VM_NAME="${name}" "${SCRIPT_DIR}/vm-control.sh" start
   else
-    VM_NAME="${name}" "${SCRIPT_DIR}/vm-create.sh"
+    OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH}" VM_NAME="${name}" "${SCRIPT_DIR}/vm-create.sh"
   fi
 }
 
@@ -253,7 +266,7 @@ EOF
 sync_shared_mounts() {
   case "${target}" in
     docker|vm)
-      if ! AGENT_RUNTIME="${AGENT_RUNTIME}" VM_NAME="${REQUESTED_VM_NAME}" "${SCRIPT_DIR}/shared-mounts.sh" sync "${target}"; then
+      if ! AGENT_RUNTIME="${AGENT_RUNTIME}" OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH}" VM_NAME="${REQUESTED_VM_NAME}" "${SCRIPT_DIR}/shared-mounts.sh" sync "${target}"; then
         if [[ "${SHARED_MOUNTS_REQUIRED}" == "1" ]]; then
           die "shared mount sync failed"
         fi
@@ -297,7 +310,7 @@ start_hermes() {
   case "${target}" in
     docker)
       sync_shared_mounts
-      "${SCRIPT_DIR}/docker-create.sh"
+      OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH}" "${SCRIPT_DIR}/docker-create.sh"
       if [[ -n "${TELEGRAM_BOT_TOKEN}" ]]; then
         TELEGRAM_TARGET=docker "${SCRIPT_DIR}/telegram-control.sh" start
       else
@@ -327,12 +340,12 @@ start_openclaw() {
   case "${target}" in
     docker)
       sync_shared_mounts
-      "${SCRIPT_DIR}/openclaw-control.sh" start docker
+      OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH}" "${SCRIPT_DIR}/openclaw-control.sh" start docker
       ;;
     vm)
       ensure_vm "${REQUESTED_VM_NAME}"
       sync_shared_mounts
-      VM_NAME="${REQUESTED_VM_NAME}" "${SCRIPT_DIR}/openclaw-control.sh" start multipass
+      OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH}" VM_NAME="${REQUESTED_VM_NAME}" "${SCRIPT_DIR}/openclaw-control.sh" start multipass
       ;;
   esac
 }

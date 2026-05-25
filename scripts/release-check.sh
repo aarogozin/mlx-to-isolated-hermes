@@ -38,6 +38,10 @@ while IFS= read -r -d '' script; do
   bash -n "${script}"
 done < <(find scripts -type f -name '*.sh' -print0)
 
+log "Checking Python syntax and RAG unit tests"
+python3 -m py_compile scripts/models-doctor.py scripts/rag.py
+"${SCRIPT_DIR}/test-rag-unit.sh"
+
 log "Running shared-folder mock tests"
 "${SCRIPT_DIR}/test-shared-mounts-mock.sh"
 
@@ -77,9 +81,27 @@ else
 fi
 
 log "Running host doctor and model API check"
-make doctor
-make model-check
-make models-doctor
+if [[ "${SKIP_HOST_DOCTOR:-0}" == "1" ]]; then
+  echo "Skipping host doctor/model API check because SKIP_HOST_DOCTOR=1"
+  make models-doctor
+else
+  make doctor
+  make model-check
+  make models-doctor
+fi
+
+if [[ "${RAG_ENABLED:-1}" == "1" || "${RAG_ENABLED:-1}" == "true" ]]; then
+  if [[ "${SKIP_RAG_E2E:-0}" == "1" ]]; then
+    echo "Skipping RAG smoke because SKIP_RAG_E2E=1"
+  elif [[ -n "${OBSIDIAN_SHARED_PATH:-}" || ( -n "${RAG_SOURCE_PATH:-}" && "${RAG_SOURCE_PATH:-}" != '${OBSIDIAN_SHARED_PATH}' && "${RAG_SOURCE_PATH:-}" != '${OBSIDIAN_SHARED_PATH:-}' ) ]]; then
+    log "Running RAG smoke"
+    make rag-install
+    make rag-index
+    QUERY="${RAG_SMOKE_QUERY:-test}" make rag-search
+  else
+    echo "Skipping RAG smoke because OBSIDIAN_SHARED_PATH/RAG_SOURCE_PATH is not set"
+  fi
+fi
 
 if [[ "${SKIP_VM_E2E:-0}" != "1" ]]; then
   log "Running VM e2e smoke"

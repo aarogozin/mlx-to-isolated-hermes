@@ -4,9 +4,10 @@ Apple Silicon local-agent stack:
 
 - LM Studio finds and downloads MLX models.
 - oMLX serves those models on the macOS host through an OpenAI-compatible API.
+- LanceDB can index your local Obsidian/text folder as a host-side RAG service.
 - Hermes or OpenClaw runs in an isolated Multipass VM or Docker container and connects back to the host model server.
 
-Version: `0.3.0`
+Version: `0.4.0`
 
 ## Quickstart
 
@@ -19,6 +20,8 @@ make agent-open-dashboard
 
 If LM Studio was just installed, launch it once before rerunning `make bootstrap`; this initializes the `lms` CLI.
 
+`make setup` also asks whether to connect local RAG for this deployment. If selected, it installs RAG dependencies, indexes `OBSIDIAN_SHARED_PATH`, starts the host RAG service, and verifies `rag-search` from inside the chosen Hermes/OpenClaw sandbox.
+
 ## Architecture
 
 Inference stays on macOS. The sandbox runs tools, package installs, documents, notes, browser tooling, and agent workflows.
@@ -27,13 +30,16 @@ Inference stays on macOS. The sandbox runs tools, package installs, documents, n
 macOS host
   LM Studio -> downloaded MLX model catalog
   oMLX      -> http://0.0.0.0:8000/v1 with Bearer auth
+  LanceDB   -> http://127.0.0.1:8765 local RAG over OBSIDIAN_SHARED_PATH
 
 Multipass Ubuntu 24.04 ARM64 VMs
   Hermes   -> HERMES_VM_NAME   -> http://model-host.internal:8000/v1
   OpenClaw -> OPENCLAW_VM_NAME -> http://model-host.internal:8000/v1
+  RAG       -> http://rag-host.internal:8765
 
 Docker Desktop container
   Hermes/OpenClaw -> http://host.docker.internal:8000/v1
+  RAG              -> http://rag-host.internal:8765
 ```
 
 Hermes and OpenClaw are both exposed through the same `agent-*` commands. Only one agent stack should run at a time. Interactive setup can pause the active stack and switch; direct `make agent-start` remains conservative unless `AGENT_CONFLICT_POLICY=pause` is set.
@@ -66,6 +72,33 @@ make model-check
 The selected model becomes the active agent's default. All inference still goes through host oMLX.
 
 `make models-doctor` scans LM Studio, `.runtime/omlx-models`, and Ollama model storage for broken symlinks, temporary download artifacts, zero-byte blobs, invalid/truncated safetensors or GGUF files, and Ollama manifests with missing blobs. `make models-prune-incomplete` removes only safely identified incomplete artifacts older than `MODEL_CLEAN_MIN_AGE_HOURS` (`1` by default).
+
+## Local RAG
+
+RAG is local-first and derived from your shared notes folder. The source stays human-editable, and the index can be deleted/rebuilt at any time.
+
+```bash
+make rag-install
+make rag-index
+make rag-start
+make rag-search QUERY="what did I decide about OpenClaw?"
+make rag-status
+make rag-stop
+```
+
+The interactive setup wizard can run this flow for you and then smoke-test access from the selected Docker/Multipass agent environment.
+
+Defaults:
+
+- source: `RAG_SOURCE_PATH=${OBSIDIAN_SHARED_PATH:-}`
+- index: `.runtime/rag`
+- service: `http://127.0.0.1:8765`
+- embeddings: `intfloat/multilingual-e5-small`
+- storage: LanceDB
+
+The sandbox gets a `rag-search` CLI bridge and `rag-host.internal` DNS alias. Hermes/OpenClaw can call `rag-search "query"` explicitly before answering questions about local notes, project knowledge, or Obsidian vault content. v0.4.0 does not inject RAG context automatically.
+
+See [docs/RAG.md](docs/RAG.md).
 
 ## Multipass VM
 
@@ -233,4 +266,16 @@ make release-check
 SKIP_VM_E2E=1 SKIP_DOCKER_E2E=1 make release-check
 ```
 
-Release check runs shell syntax, mocked shared-folder tests, host doctor/model API checks, VM e2e, real shared-folder smoke, Docker e2e, and daemon status checks.
+Release check runs shell/Python syntax, mocked shared-folder tests, RAG unit tests, host doctor/model API checks, optional RAG smoke, VM e2e, real shared-folder smoke, Docker e2e, and daemon status checks.
+
+## Local Matrix E2E
+
+```bash
+make matrix-e2e
+MATRIX_MODES="hermes/docker" MATRIX_CLEAN_MODE=none make matrix-e2e
+MATRIX_RAG_SOURCE_MODE=env make matrix-e2e
+```
+
+`matrix-e2e` is a destructive local sandbox smoke test. By default it runs `FORCE=1 clean-all` once, preserves `.env`, models, your real Obsidian vault, and `.runtime/rag`, disables Telegram only for child processes, creates a synthetic RAG vault/index under the run report directory, then checks Hermes/OpenClaw across Docker and Multipass. Use `MATRIX_RAG_SOURCE_MODE=env` to test your configured `OBSIDIAN_SHARED_PATH` instead. Reports are written under `.runtime/matrix-e2e/`.
+
+Future model provider work is tracked in [docs/PROVIDERS.md](docs/PROVIDERS.md).

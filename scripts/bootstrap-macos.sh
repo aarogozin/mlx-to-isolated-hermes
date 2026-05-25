@@ -334,6 +334,29 @@ configure_project_env() {
   set_env_value MODEL_DIR "${model_dir}"
   set_env_value OLLAMA_MODELS "${HOME}/.ollama/models"
   set_env_value MODEL_CLEAN_MIN_AGE_HOURS "1"
+  set_env_value RAG_ENABLED "1"
+  [[ -n "$(env_value RAG_SOURCE_PATH)" ]] || set_env_value RAG_SOURCE_PATH '${OBSIDIAN_SHARED_PATH:-}'
+  [[ -n "$(env_value RAG_INDEX_PATH)" ]] || set_env_value RAG_INDEX_PATH ".runtime/rag"
+  [[ -n "$(env_value RAG_HOST)" ]] || set_env_value RAG_HOST "127.0.0.1"
+  [[ -n "$(env_value RAG_BIND_HOST)" ]] || set_env_value RAG_BIND_HOST "0.0.0.0"
+  [[ -n "$(env_value RAG_PORT)" ]] || set_env_value RAG_PORT "8765"
+  [[ -n "$(env_value RAG_BASE_URL)" ]] || set_env_value RAG_BASE_URL "http://127.0.0.1:8765"
+  [[ -n "$(env_value RAG_BASE_URL_GUEST)" ]] || set_env_value RAG_BASE_URL_GUEST "http://rag-host.internal:8765"
+  [[ -n "$(env_value RAG_BASE_URL_DOCKER)" ]] || set_env_value RAG_BASE_URL_DOCKER "http://rag-host.internal:8765"
+  [[ -n "$(env_value RAG_EMBEDDING_MODEL)" ]] || set_env_value RAG_EMBEDDING_MODEL "intfloat/multilingual-e5-small"
+  [[ -n "$(env_value RAG_EMBEDDING_BACKEND)" ]] || set_env_value RAG_EMBEDDING_BACKEND "sentence-transformers"
+  [[ -n "$(env_value RAG_TEXT_EXTENSIONS)" ]] || set_env_value RAG_TEXT_EXTENSIONS ".md,.txt,.rst,.csv,.tsv,.json,.yaml,.yml,.toml,.xml,.html"
+  [[ -n "$(env_value RAG_EXCLUDE_GLOBS)" ]] || set_env_value RAG_EXCLUDE_GLOBS ".git/**,.obsidian/**,node_modules/**,.trash/**,*.env,*.key,*.pem"
+  [[ -n "$(env_value RAG_MAX_FILE_MB)" ]] || set_env_value RAG_MAX_FILE_MB "10"
+  [[ -n "$(env_value RAG_CHUNK_TOKENS)" ]] || set_env_value RAG_CHUNK_TOKENS "800"
+  [[ -n "$(env_value RAG_CHUNK_OVERLAP_TOKENS)" ]] || set_env_value RAG_CHUNK_OVERLAP_TOKENS "120"
+  [[ -n "$(env_value RAG_TOP_K)" ]] || set_env_value RAG_TOP_K "8"
+  [[ -n "$(env_value MATRIX_MODES)" ]] || set_env_value MATRIX_MODES "hermes/docker hermes/multipass openclaw/docker openclaw/multipass"
+  [[ -n "$(env_value MATRIX_RAG_QUERY)" ]] || set_env_value MATRIX_RAG_QUERY "OpenClaw"
+  [[ -n "$(env_value MATRIX_CHAT_TIMEOUT_SECONDS)" ]] || set_env_value MATRIX_CHAT_TIMEOUT_SECONDS "180"
+  [[ -n "$(env_value MATRIX_CLEAN_MODE)" ]] || set_env_value MATRIX_CLEAN_MODE "once"
+  [[ -n "$(env_value MATRIX_TELEGRAM)" ]] || set_env_value MATRIX_TELEGRAM "disabled"
+  [[ -n "$(env_value MATRIX_FINAL_ACTION)" ]] || set_env_value MATRIX_FINAL_ACTION "pause"
   set_env_value OMLX_PORT "8000"
   set_env_value LMSTUDIO_PORT "1234"
   set_env_value MODEL_BIND_HOST "0.0.0.0"
@@ -422,6 +445,7 @@ Next:
   make models-search       # wraps: lms get --mlx
   make models-list         # wraps: lms ls --json
   make model-start-bg      # serves LM Studio model dir with oMLX
+  make rag-install         # optional local LanceDB RAG dependencies
 
 Project env:
   ${ENV_FILE}

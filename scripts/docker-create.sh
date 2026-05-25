@@ -12,6 +12,9 @@ OVERRIDE_DOCKER_WORKSPACE_VOLUME="${DOCKER_WORKSPACE_VOLUME:-}"
 OVERRIDE_DOCKER_DASHBOARD_PORT="${DOCKER_DASHBOARD_PORT:-}"
 OVERRIDE_DOCKER_GATEWAY_API_PORT="${DOCKER_GATEWAY_API_PORT:-}"
 OVERRIDE_MODEL_NAME="${MODEL_NAME:-}"
+OVERRIDE_OBSIDIAN_SHARED_PATH_SET="${OBSIDIAN_SHARED_PATH+x}"
+OVERRIDE_OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
+OVERRIDE_OBSIDIAN_GUEST_PATH="${OBSIDIAN_GUEST_PATH:-}"
 OVERRIDE_TELEGRAM_BOT_TOKEN_SET="${TELEGRAM_BOT_TOKEN+x}"
 OVERRIDE_TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 
@@ -36,11 +39,16 @@ HERMES_GATEWAY_API_PORT="${HERMES_GATEWAY_API_PORT:-8642}"
 DOCKER_GATEWAY_API_PORT="${OVERRIDE_DOCKER_GATEWAY_API_PORT:-${DOCKER_GATEWAY_API_PORT:-8642}}"
 OPENAI_BASE_URL_DOCKER="${OPENAI_BASE_URL_DOCKER:-http://host.docker.internal:8000/v1}"
 ANTHROPIC_BASE_URL_DOCKER="${ANTHROPIC_BASE_URL_DOCKER:-http://host.docker.internal:8000}"
+RAG_BASE_URL_DOCKER="${RAG_BASE_URL_DOCKER:-http://rag-host.internal:8765}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY}}"
 MODEL_NAME="${OVERRIDE_MODEL_NAME:-${MODEL_NAME:-}}"
-OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
-OBSIDIAN_GUEST_PATH="${OBSIDIAN_GUEST_PATH:-/mnt/obsidian}"
+if [[ -n "${OVERRIDE_OBSIDIAN_SHARED_PATH_SET}" ]]; then
+  OBSIDIAN_SHARED_PATH="${OVERRIDE_OBSIDIAN_SHARED_PATH}"
+else
+  OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
+fi
+OBSIDIAN_GUEST_PATH="${OVERRIDE_OBSIDIAN_GUEST_PATH:-${OBSIDIAN_GUEST_PATH:-/mnt/obsidian}}"
 if [[ -n "${OVERRIDE_TELEGRAM_BOT_TOKEN_SET}" ]]; then
   TELEGRAM_BOT_TOKEN="${OVERRIDE_TELEGRAM_BOT_TOKEN}"
 else
@@ -108,6 +116,8 @@ write_data_volume() {
     -e TELEGRAM_GROUP_ALLOWED_CHATS="${TELEGRAM_GROUP_ALLOWED_CHATS}" \
     -e GATEWAY_ALLOWED_USERS="${GATEWAY_ALLOWED_USERS}" \
     -e GATEWAY_ALLOW_ALL_USERS="${GATEWAY_ALLOW_ALL_USERS}" \
+    -e RAG_BASE_URL="${RAG_BASE_URL_DOCKER}" \
+    -v "${SCRIPT_DIR}/rag-search-bridge.sh:/tmp/rag-search:ro" \
     -v "${DOCKER_DATA_VOLUME}:/opt/data" \
     -v "${DOCKER_WORKSPACE_VOLUME}:/opt/data/workspace" \
     "${DOCKER_IMAGE}" \
@@ -119,6 +129,7 @@ ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}
 OPENAI_API_KEY=${OPENAI_API_KEY}
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 MODEL_NAME=${MODEL_NAME}
+RAG_BASE_URL=${RAG_BASE_URL}
 EOF
 append_env_if_set() {
   key="$1"
@@ -151,6 +162,13 @@ terminal:
   backend: local
   cwd: "/opt/data/workspace"
 EOF
+install -m 0755 /tmp/rag-search /opt/data/.local/bin/rag-search
+mkdir -p /opt/data/skills/local-rag
+cat > /opt/data/skills/local-rag/SKILL.md <<EOF
+# Local RAG
+
+Use `rag-search "query"` before answering questions about local notes, Obsidian vault content, project knowledge, or personal documents. The tool queries the host LanceDB index at \${RAG_BASE_URL}.
+EOF
 chmod 600 /opt/data/.env /opt/data/config.yaml'
 }
 
@@ -177,7 +195,12 @@ if docker container inspect "${DOCKER_NAME}" >/dev/null 2>&1; then
   current_dashboard_port="$(docker inspect -f '{{range $port, $bindings := .NetworkSettings.Ports}}{{if eq $port "9119/tcp"}}{{range $bindings}}{{.HostIp}}:{{.HostPort}}{{end}}{{end}}{{end}}' "${DOCKER_NAME}")"
   current_gateway_port="$(docker inspect -f '{{range $port, $bindings := .NetworkSettings.Ports}}{{if eq $port "8642/tcp"}}{{range $bindings}}{{.HostIp}}:{{.HostPort}}{{end}}{{end}}{{end}}' "${DOCKER_NAME}")"
   current_command="$(docker inspect -f '{{join .Config.Cmd " "}}' "${DOCKER_NAME}")"
-  if [[ "${current_image_id}" == "${desired_image_id}" && "${current_dashboard_port}" == "${desired_dashboard_port}" && "${current_gateway_port}" == "${desired_gateway_port}" && "${current_command}" == "${desired_command}" ]]; then
+  current_extra_hosts="$(docker inspect -f '{{range .HostConfig.ExtraHosts}}{{println .}}{{end}}' "${DOCKER_NAME}")"
+  if [[ "${current_image_id}" == "${desired_image_id}" \
+    && "${current_dashboard_port}" == "${desired_dashboard_port}" \
+    && "${current_gateway_port}" == "${desired_gateway_port}" \
+    && "${current_command}" == "${desired_command}" \
+    && "${current_extra_hosts}" == *"rag-host.internal:host-gateway"* ]]; then
     echo "Docker container already exists: ${DOCKER_NAME}"
     echo "Image: ${DOCKER_IMAGE}"
     echo "Dashboard: http://127.0.0.1:${DOCKER_DASHBOARD_PORT}"
@@ -200,10 +223,12 @@ docker create \
   -p "127.0.0.1:${DOCKER_DASHBOARD_PORT}:9119" \
   --add-host host.docker.internal:host-gateway \
   --add-host model-host.internal:host-gateway \
+  --add-host rag-host.internal:host-gateway \
   -e HERMES_DASHBOARD=1 \
   -e HERMES_DASHBOARD_HOST=0.0.0.0 \
   -e HERMES_DASHBOARD_PORT="${HERMES_DASHBOARD_PORT}" \
   -e HERMES_DASHBOARD_TUI="${HERMES_DASHBOARD_TUI:-1}" \
+  -e PATH="/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   "${mount_args[@]}" \
   "${DOCKER_IMAGE}" \
   gateway run >/dev/null
