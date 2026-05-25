@@ -207,7 +207,7 @@ docker_prepare_volumes() {
     -lc 'mkdir -p /home/node/.openclaw/workspace /home/node/.openclaw/skills/local-rag /home/node/.config/openclaw && cp /tmp/rag-search /home/node/.openclaw/rag-search && chmod 0755 /home/node/.openclaw/rag-search && cat > /home/node/.openclaw/skills/local-rag/SKILL.md <<'"'"'EOF'"'"'
 # Local RAG
 
-Use `rag-search "query"` before answering questions about local notes, Obsidian vault content, project knowledge, or personal documents.
+Use `rag-search "query"` before answering questions that may depend on local notes, Obsidian vault content, project knowledge, or personal documents. Prefer a focused search query, cite the returned note path when useful, and do not claim the local knowledge base has no answer until `rag-search` returns no relevant results.
 EOF
 chown -R 1000:1000 /home/node/.openclaw /home/node/.config/openclaw'
 }
@@ -510,7 +510,7 @@ chmod 600 ~/.openclaw/.env"
   vm_exec_agent "mkdir -p ~/.openclaw/skills/local-rag && cat > ~/.openclaw/skills/local-rag/SKILL.md <<'EOF'
 # Local RAG
 
-Use \`rag-search \"query\"\` before answering questions about local notes, Obsidian vault content, project knowledge, or personal documents.
+Use \`rag-search \"query\"\` before answering questions that may depend on local notes, Obsidian vault content, project knowledge, or personal documents. Prefer a focused search query, cite the returned note path when useful, and do not claim the local knowledge base has no answer until \`rag-search\` returns no relevant results.
 EOF"
 
   vm_exec_agent "grep -Fqx 'export PATH=\"\$HOME/.npm-global/bin:\$HOME/.local/bin:\$PATH\"' ~/.profile || printf '\\nexport PATH=\"\$HOME/.npm-global/bin:\$HOME/.local/bin:\$PATH\"\\n' >> ~/.profile"

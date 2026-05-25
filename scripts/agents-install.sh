@@ -267,7 +267,7 @@ install -d -o "${AGENT_USER}" -g "${AGENT_USER}" "/home/${AGENT_USER}/.hermes/sk
 cat > "/home/${AGENT_USER}/.hermes/skills/local-rag/SKILL.md" <<'SKILLEOF'
 # Local RAG
 
-Use `rag-search "query"` before answering questions about local notes, Obsidian vault content, project knowledge, or personal documents.
+Use `rag-search "query"` before answering questions that may depend on local notes, Obsidian vault content, project knowledge, or personal documents. Prefer a focused search query, cite the returned note path when useful, and do not claim the local knowledge base has no answer until `rag-search` returns no relevant results.
 SKILLEOF
 
 cat > "/home/${AGENT_USER}/.hermes/config.yaml" <<CFGEOF

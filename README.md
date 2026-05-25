@@ -80,7 +80,9 @@ RAG is local-first and derived from your shared notes folder. The source stays h
 ```bash
 make rag-install
 make rag-index
+make rag-sync
 make rag-start
+make rag-watch-start
 make rag-search QUERY="what did I decide about OpenClaw?"
 make rag-status
 make rag-stop
@@ -97,6 +99,8 @@ Defaults:
 - storage: LanceDB
 
 The sandbox gets a `rag-search` CLI bridge and `rag-host.internal` DNS alias. Hermes/OpenClaw can call `rag-search "query"` explicitly before answering questions about local notes, project knowledge, or Obsidian vault content. v0.4.0 does not inject RAG context automatically.
+
+`RAG_AUTO_INDEX=1` starts a host watcher with `make rag-start`; changed, created, and deleted source files are picked up after `RAG_WATCH_INTERVAL_SECONDS` plus debounce. Use `make rag-sync` for a one-shot index plus service start.
 
 See [docs/RAG.md](docs/RAG.md).
 
@@ -141,7 +145,7 @@ Multipass can only snapshot stopped instances, so the release workflow is stop -
 
 ## Shared Folder
 
-If `OBSIDIAN_SHARED_PATH` is set, Multipass syncs that folder to `OBSIDIAN_GUEST_PATH` (`/mnt/obsidian` by default). The default `MULTIPASS_SHARED_MODE=transfer` copies a snapshot and avoids brittle SSHFS behavior.
+If `OBSIDIAN_SHARED_PATH` is set, Multipass mounts that folder at `OBSIDIAN_GUEST_PATH` (`/mnt/obsidian` by default). The default `MULTIPASS_SHARED_MODE=mount` gives the VM the same live folder as the host. `transfer` remains a snapshot fallback for debugging, but it is not the normal no-manual-sync mode.
 
 ```bash
 make shared-mounts-sync

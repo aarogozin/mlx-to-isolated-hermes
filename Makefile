@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 .PHONY: bootstrap setup doctor clean-all release-check ci-check matrix-e2e \
 	models-search models-list models-sync models-doctor models-prune-incomplete model-select model-start-bg model-stop-bg model-check \
-	rag-install rag-index rag-search rag-start rag-stop rag-status rag-doctor \
+	rag-install rag-index rag-sync rag-search rag-start rag-stop rag-status rag-doctor rag-watch-start rag-watch-stop rag-watch-status rag-watch-logs \
 	agent-start agent-stop agent-restart agent-pause agent-switch agent-status agent-logs agent-shell agent-open-dashboard \
 	dashboard-remote-start dashboard-remote-stop dashboard-remote-status \
 	vm-create vm-start vm-stop vm-ssh vm-snapshot vm-reset vm-destroy vm-status \
@@ -68,6 +68,9 @@ rag-install:
 rag-index:
 	./scripts/rag-control.sh index
 
+rag-sync:
+	./scripts/rag-control.sh sync
+
 rag-search:
 	@test -n "$(QUERY)" || (echo 'Usage: make rag-search QUERY="your query"' >&2; exit 2)
 	./scripts/rag-control.sh search "$(QUERY)"
@@ -83,6 +86,18 @@ rag-status:
 
 rag-doctor:
 	./scripts/rag-control.sh doctor
+
+rag-watch-start:
+	./scripts/rag-control.sh watch-start
+
+rag-watch-stop:
+	./scripts/rag-control.sh watch-stop
+
+rag-watch-status:
+	./scripts/rag-control.sh watch-status
+
+rag-watch-logs:
+	./scripts/rag-control.sh watch-logs
 
 agent-start:
 	./scripts/agent-control.sh start

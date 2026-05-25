@@ -57,6 +57,8 @@ esac
 
 PID_FILE="${RAG_INDEX_ABS}/rag-service.pid"
 LOG_FILE="${RAG_INDEX_ABS}/rag-service.log"
+WATCH_PID_FILE="${RAG_INDEX_ABS}/rag-watch.pid"
+WATCH_LOG_FILE="${RAG_INDEX_ABS}/rag-watch.log"
 PYTHON_BIN="${RAG_VENV_ABS}/bin/python"
 
 die() {
@@ -101,6 +103,18 @@ service_running() {
   [[ -n "${pid}" ]] && kill -0 "${pid}" >/dev/null 2>&1
 }
 
+watch_pid() {
+  if [[ -f "${WATCH_PID_FILE}" ]]; then
+    cat "${WATCH_PID_FILE}"
+  fi
+}
+
+watch_running() {
+  local pid
+  pid="$(watch_pid || true)"
+  [[ -n "${pid}" ]] && kill -0 "${pid}" >/dev/null 2>&1
+}
+
 port_service_pids() {
   command -v lsof >/dev/null 2>&1 || return 0
   local pid
@@ -129,6 +143,35 @@ start_service() {
     die "RAG service failed to start"
   fi
   echo "RAG service running: http://${RAG_HOST}:${RAG_PORT}"
+}
+
+start_watch() {
+  ensure_enabled
+  ensure_installed
+  mkdir -p "${RAG_INDEX_ABS}"
+  if watch_running; then
+    echo "RAG watcher already running: pid=$(watch_pid), source=${RAG_SOURCE_PATH:-${OBSIDIAN_SHARED_PATH:-unset}}"
+    return 0
+  fi
+  nohup "${PYTHON_BIN}" "${SCRIPT_DIR}/rag.py" watch >"${WATCH_LOG_FILE}" 2>&1 &
+  echo "$!" > "${WATCH_PID_FILE}"
+  sleep 1
+  if ! watch_running; then
+    tail -n 80 "${WATCH_LOG_FILE}" >&2 || true
+    die "RAG watcher failed to start"
+  fi
+  echo "RAG watcher running: pid=$(watch_pid), source=${RAG_SOURCE_PATH:-${OBSIDIAN_SHARED_PATH:-unset}}"
+}
+
+stop_watch() {
+  if watch_running; then
+    kill "$(watch_pid)" >/dev/null 2>&1 || true
+    rm -f "${WATCH_PID_FILE}"
+    echo "RAG watcher stopped"
+  else
+    rm -f "${WATCH_PID_FILE}"
+    echo "RAG watcher not running"
+  fi
 }
 
 stop_service() {
@@ -163,6 +206,11 @@ status_service() {
   else
     echo "rag=stopped url=http://${RAG_HOST}:${RAG_PORT}"
   fi
+  if watch_running; then
+    echo "rag_watch=running pid=$(watch_pid) interval=${RAG_WATCH_INTERVAL_SECONDS:-20}s"
+  else
+    echo "rag_watch=stopped interval=${RAG_WATCH_INTERVAL_SECONDS:-20}s"
+  fi
 }
 
 ACTION="${1:-}"
@@ -178,6 +226,12 @@ case "${ACTION}" in
     ensure_installed
     "${PYTHON_BIN}" "${SCRIPT_DIR}/rag.py" index "$@"
     ;;
+  sync)
+    ensure_enabled
+    ensure_installed
+    "${PYTHON_BIN}" "${SCRIPT_DIR}/rag.py" index "$@"
+    start_service
+    ;;
   search)
     ensure_enabled
     ensure_installed
@@ -185,13 +239,44 @@ case "${ACTION}" in
     ;;
   start)
     start_service
+    if [[ "${RAG_AUTO_INDEX:-0}" == "1" || "${RAG_AUTO_INDEX:-0}" == "true" ]]; then
+      start_watch
+    fi
     ;;
   stop)
+    stop_watch
     stop_service
     ;;
   restart)
+    stop_watch
     stop_service
     start_service
+    if [[ "${RAG_AUTO_INDEX:-0}" == "1" || "${RAG_AUTO_INDEX:-0}" == "true" ]]; then
+      start_watch
+    fi
+    ;;
+  watch)
+    ensure_enabled
+    ensure_installed
+    "${PYTHON_BIN}" "${SCRIPT_DIR}/rag.py" watch "$@"
+    ;;
+  watch-start)
+    start_watch
+    ;;
+  watch-stop)
+    stop_watch
+    ;;
+  watch-restart)
+    stop_watch
+    start_watch
+    ;;
+  watch-status)
+    if watch_running; then
+      echo "rag_watch=running pid=$(watch_pid) source=${RAG_SOURCE_PATH:-${OBSIDIAN_SHARED_PATH:-unset}}"
+    else
+      echo "rag_watch=stopped source=${RAG_SOURCE_PATH:-${OBSIDIAN_SHARED_PATH:-unset}}"
+      exit 1
+    fi
     ;;
   status)
     status_service
@@ -215,9 +300,12 @@ case "${ACTION}" in
   logs)
     tail -n "${RAG_LOG_LINES:-120}" "${LOG_FILE}" 2>/dev/null || true
     ;;
+  watch-logs)
+    tail -n "${RAG_LOG_LINES:-120}" "${WATCH_LOG_FILE}" 2>/dev/null || true
+    ;;
   *)
     cat >&2 <<EOF
-Usage: $0 <install|index|search|start|stop|restart|status|doctor|health|logs>
+Usage: $0 <install|index|sync|search|start|stop|restart|status|doctor|health|logs|watch|watch-start|watch-stop|watch-restart|watch-status|watch-logs>
 EOF
     exit 2
     ;;

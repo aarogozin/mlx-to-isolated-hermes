@@ -39,12 +39,14 @@ make shared-mounts-check
 ```bash
 make rag-install
 make rag-index
+make rag-sync
 make rag-start
+make rag-watch-start
 make rag-search QUERY="проверочный запрос"
 make rag-status
 ```
 
-Агенты получают `rag-search` внутри Docker/Multipass и ходят к host-сервису через `rag-host.internal:8765`.
+Агенты получают `rag-search` внутри Docker/Multipass и ходят к host-сервису через `rag-host.internal:8765`. При `RAG_AUTO_INDEX=1` команда `make rag-start` также поднимает watcher, который автоматически переиндексирует изменения в `OBSIDIAN_SHARED_PATH` с небольшим лагом.
 
 ## Docker smoke
 
@@ -94,8 +96,8 @@ make dashboard-remote-stop
 make model-start-bg
 make model-stop-bg
 make rag-index
+make rag-sync
 make rag-search QUERY="..."
-make shared-mounts-sync
 make shared-mounts-status
 make vm-snapshot
 make vm-reset

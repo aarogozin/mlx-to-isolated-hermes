@@ -625,6 +625,59 @@ def health() -> dict[str, Any]:
     }
 
 
+def source_fingerprint(root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in discover_files(root):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        relative = relpath(path, root)
+        digest.update(relative.encode("utf-8", errors="replace"))
+        digest.update(b"\0")
+        digest.update(str(stat.st_mtime_ns).encode("ascii"))
+        digest.update(b"\0")
+        digest.update(str(stat.st_size).encode("ascii"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def watch(interval: int | None = None, debounce: int | None = None) -> None:
+    interval = interval or env_int("RAG_WATCH_INTERVAL_SECONDS", 20)
+    debounce = debounce if debounce is not None else env_int("RAG_WATCH_DEBOUNCE_SECONDS", 3)
+    interval = max(2, interval)
+    debounce = max(0, debounce)
+    root = source_path()
+    previous = ""
+    print(
+        json.dumps(
+            {
+                "event": "rag-watch-start",
+                "source_path": str(root),
+                "index_path": str(index_path()),
+                "interval_seconds": interval,
+                "debounce_seconds": debounce,
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
+    while True:
+        try:
+            current = source_fingerprint(root)
+            if current != previous:
+                if previous and debounce:
+                    time.sleep(debounce)
+                    current = source_fingerprint(root)
+                result = index_documents(prune=True)
+                result["event"] = "rag-index"
+                print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
+                previous = current
+        except Exception as exc:
+            print(json.dumps({"event": "rag-watch-error", "error": str(exc)}, ensure_ascii=False), flush=True)
+        time.sleep(interval)
+
+
 def serve() -> None:
     try:
         from fastapi import FastAPI, HTTPException, Request
@@ -791,6 +844,9 @@ def main(argv: list[str] | None = None) -> int:
     search_parser.add_argument("--tag")
     search_parser.add_argument("--modified-after")
     sub.add_parser("serve")
+    watch_parser = sub.add_parser("watch")
+    watch_parser.add_argument("--interval", type=int)
+    watch_parser.add_argument("--debounce", type=int)
     sub.add_parser("health")
     sub.add_parser("self-test")
     args = parser.parse_args(argv)
@@ -823,6 +879,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "serve":
             serve()
+            return 0
+        if args.command == "watch":
+            watch(interval=args.interval, debounce=args.debounce)
             return 0
         if args.command == "health":
             print(json.dumps(health(), ensure_ascii=False, indent=2, sort_keys=True))

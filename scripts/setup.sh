@@ -422,8 +422,14 @@ configure_rag() {
   env_put RAG_BASE_URL "http://127.0.0.1:${rag_port}"
   env_put RAG_BASE_URL_GUEST "http://rag-host.internal:${rag_port}"
   env_put RAG_BASE_URL_DOCKER "http://rag-host.internal:${rag_port}"
+  env_put RAG_AUTO_INDEX "1"
+  [[ -n "$(env_get RAG_WATCH_INTERVAL_SECONDS)" ]] || env_put RAG_WATCH_INTERVAL_SECONDS "20"
+  [[ -n "$(env_get RAG_WATCH_DEBOUNCE_SECONDS)" ]] || env_put RAG_WATCH_DEBOUNCE_SECONDS "3"
+  env_put MULTIPASS_SHARED_MODE "mount"
 
-  RAG_SMOKE_QUERY="$(prompt "RAG smoke-test query" "${SELECTED_MODEL:-local agent}")"
+  RAG_SMOKE_QUERY="$(env_get RAG_SMOKE_QUERY)"
+  RAG_SMOKE_QUERY="${RAG_SMOKE_QUERY:-${SELECTED_MODEL:-local knowledge}}"
+  info "RAG smoke-test query: ${RAG_SMOKE_QUERY}"
 
   substep "Installing RAG dependencies..."
   "${SCRIPT_DIR}/rag-control.sh" install
@@ -431,7 +437,7 @@ configure_rag() {
   substep "Indexing local knowledge source..."
   "${SCRIPT_DIR}/rag-control.sh" index
 
-  substep "Starting host RAG service..."
+  substep "Starting host RAG service and auto-index watcher..."
   "${SCRIPT_DIR}/rag-control.sh" start
 
   substep "Verifying host RAG search..."
@@ -643,6 +649,7 @@ DONE
   printf "  ${DIM}  make doctor               ${RESET}# full system health check\n"
   printf "  ${DIM}  make model-select         ${RESET}# switch local model\n"
   printf "  ${DIM}  make rag-search QUERY=\"...\" ${RESET}# query local RAG\n"
+  printf "  ${DIM}  make rag-status           ${RESET}# RAG service and auto-index watcher\n"
   if [[ "${BACKEND}" != "docker" ]]; then
     printf "  ${DIM}  make vm-ssh               ${RESET}# SSH into the agent VM\n"
     printf "  ${DIM}  make vm-status            ${RESET}# show VM status and IP\n"
