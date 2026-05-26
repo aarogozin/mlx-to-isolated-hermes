@@ -53,10 +53,6 @@ MULTIPASS_LAUNCH_TIMEOUT="${MULTIPASS_LAUNCH_TIMEOUT:-900}"
 VM_PACKAGE_UPGRADE="${VM_PACKAGE_UPGRADE:-false}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY}}"
-TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-}"
-TAILSCALE_ENABLED="${TAILSCALE_ENABLED:-0}"
-TAILSCALE_HOSTNAME="${TAILSCALE_HOSTNAME:-${VM_NAME}}"
-TAILSCALE_EXTRA_ARGS="${TAILSCALE_EXTRA_ARGS:-}"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -72,35 +68,7 @@ shell_quote() {
 }
 
 set_env_value() {
-  local key="$1"
-  local value="$2"
-  local escaped_value
-  local tmp
-
-  [[ -f "${ENV_FILE}" ]] || cp "${ENV_EXAMPLE}" "${ENV_FILE}"
-  escaped_value="$(shell_quote "${value}")"
-  tmp="$(mktemp)"
-
-  if grep -q "^${key}=" "${ENV_FILE}"; then
-    awk -v key="${key}" -v value="${escaped_value}" '
-      $0 ~ "^" key "=" {
-        print key "=" value
-        replaced = 1
-        next
-      }
-      { print }
-      END {
-        if (replaced != 1) {
-          print key "=" value
-        }
-      }
-    ' "${ENV_FILE}" > "${tmp}"
-  else
-    cp "${ENV_FILE}" "${tmp}"
-    printf '%s=%s\n' "${key}" "${escaped_value}" >> "${tmp}"
-  fi
-
-  mv "${tmp}" "${ENV_FILE}"
+  "${SCRIPT_DIR}/env-set.sh" "${ENV_FILE}" "$1" "$2"
 }
 
 ensure_ssh_key() {
@@ -248,15 +216,6 @@ runcmd:
   - systemctl enable --now ssh
 EOF
 
-  if [[ "${TAILSCALE_ENABLED}" == "1" || "${TAILSCALE_ENABLED}" == "true" || -n "${TAILSCALE_AUTH_KEY}" ]]; then
-    cat >> "${CLOUD_INIT}" <<EOF
-  - curl -fsSL https://tailscale.com/install.sh | sh
-EOF
-    if [[ -n "${TAILSCALE_AUTH_KEY}" ]]; then
-      printf '  - tailscale up --authkey="%s" --hostname="%s" --accept-routes %s\n' "${TAILSCALE_AUTH_KEY}" "${TAILSCALE_HOSTNAME}" "${TAILSCALE_EXTRA_ARGS}" >> "${CLOUD_INIT}"
-    fi
-  fi
-
   cat >> "${CLOUD_INIT}" <<EOF
 final_message: "omlx-agent Multipass Ubuntu VM is ready after \$UPTIME seconds"
 EOF
@@ -266,7 +225,7 @@ create_instance() {
   log "Creating Multipass Ubuntu VM"
 
   if instance_exists; then
-    die "Multipass instance already exists: ${VM_NAME}. Use make vm-start or delete it with: multipass delete --purge ${VM_NAME}"
+    die "Multipass instance already exists: ${VM_NAME}. Use ./scripts/vm-control.sh start or delete it with: multipass delete --purge ${VM_NAME}"
   fi
 
   multipass launch "${UBUNTU_MULTIPASS_IMAGE}" \
@@ -324,8 +283,6 @@ EOF
   set_env_value UBUNTU_MULTIPASS_IMAGE "${UBUNTU_MULTIPASS_IMAGE}"
   set_env_value MULTIPASS_LAUNCH_TIMEOUT "${MULTIPASS_LAUNCH_TIMEOUT}"
   set_env_value VM_PACKAGE_UPGRADE "${VM_PACKAGE_UPGRADE}"
-  set_env_value TAILSCALE_ENABLED "${TAILSCALE_ENABLED}"
-  set_env_value TAILSCALE_HOSTNAME "${TAILSCALE_HOSTNAME}"
 }
 
 main() {
@@ -346,20 +303,11 @@ Resources: ${VM_CPUS} vCPU, ${VM_MEMORY} RAM, ${VM_DISK} disk
 SSH user: ${VM_SSH_USER}
 EOF
 
-  if [[ -n "${TAILSCALE_AUTH_KEY}" ]]; then
-    echo "Tailscale: Configured with Auth Key (automated join)"
-  elif [[ "${TAILSCALE_ENABLED}" == "1" || "${TAILSCALE_ENABLED}" == "true" ]]; then
-    echo "Tailscale: Installed. To join your tailnet, run:"
-    echo "  multipass exec ${VM_NAME} -- sudo tailscale up --hostname=${TAILSCALE_HOSTNAME}"
-  else
-    echo "Tailscale: Disabled. Set TAILSCALE_ENABLED=1 or TAILSCALE_AUTH_KEY to install it in the VM."
-  fi
-
   cat <<EOF
 
 Next:
   make vm-ssh
-  make vm-snapshot
+  ./scripts/vm-control.sh snapshot
 EOF
 }
 

@@ -159,30 +159,6 @@ check_model_artifacts() {
   fi
 }
 
-check_tailscale() {
-  local enabled="${TAILSCALE_ENABLED:-0}"
-  local serve_enabled="${TAILSCALE_SERVE_ENABLED:-0}"
-  local auth_key="${TAILSCALE_AUTH_KEY:-}"
-
-  if [[ "${enabled}" != "1" && "${enabled}" != "true" && "${serve_enabled}" != "1" && "${serve_enabled}" != "true" && -z "${auth_key}" ]]; then
-    pass "Tailscale: disabled (optional)"
-    return
-  fi
-
-  if command -v tailscale >/dev/null 2>&1; then
-    pass "tailscale CLI: $(command -v tailscale)"
-    if tailscale status >/dev/null 2>&1; then
-      pass "Tailscale: running and connected"
-    elif [[ "${serve_enabled}" == "1" || "${serve_enabled}" == "true" ]]; then
-      fail "Tailscale Serve enabled but host is not logged in/connected"
-    else
-      warn "Tailscale: CLI installed, but not logged in/connected"
-    fi
-  else
-    fail "tailscale CLI missing but Tailscale is enabled"
-  fi
-}
-
 check_rag() {
   local enabled="${RAG_ENABLED:-1}"
 
@@ -224,7 +200,6 @@ main() {
   check_multipass
   check_docker
   check_model_api
-  check_tailscale
   check_rag
 
   printf '\nDoctor finished: %s failure(s), %s warning(s)\n' "${failures}" "${warnings}"

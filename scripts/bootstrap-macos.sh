@@ -240,7 +240,6 @@ install_apps_and_runtimes() {
 
   brew_install_cask_if_app_missing lm-studio "/Applications/LM Studio.app"
   brew_install_cask_if_app_missing docker-desktop "/Applications/Docker.app"
-  brew_install_cask_if_app_missing tailscale "/Applications/Tailscale.app"
   brew_install_cask_or_manual_admin multipass "/Applications/Multipass.app" "Install Multipass with an admin prompt from a normal terminal:
   brew install --cask multipass
 
@@ -260,13 +259,17 @@ Or download Canonical Multipass for macOS from:
     brew_install_formula jundot/omlx/omlx
   fi
 
-  local rag_ocr_enabled install_rag_ocr
+  local rag_runtime rag_ocr_enabled install_rag_ocr install_rag_host
+  rag_runtime="${RAG_RUNTIME:-$(env_value RAG_RUNTIME)}"
+  rag_runtime="${rag_runtime:-docker}"
   rag_ocr_enabled="${RAG_OCR_ENABLED:-$(env_value RAG_OCR_ENABLED)}"
   rag_ocr_enabled="${rag_ocr_enabled:-1}"
   install_rag_ocr="${INSTALL_RAG_OCR:-$(env_value INSTALL_RAG_OCR)}"
-  install_rag_ocr="${install_rag_ocr:-1}"
+  install_rag_ocr="${install_rag_ocr:-0}"
+  install_rag_host="${INSTALL_RAG_HOST:-$(env_value INSTALL_RAG_HOST)}"
+  install_rag_host="${install_rag_host:-0}"
 
-  if truthy "${rag_ocr_enabled}" && truthy "${install_rag_ocr}"; then
+  if [[ "${rag_runtime}" == "host" ]] && truthy "${install_rag_host}" && truthy "${rag_ocr_enabled}" && truthy "${install_rag_ocr}"; then
     log "Installing RAG OCR system dependencies"
     brew_install_formula tesseract
     install_rag_ocr_languages
@@ -323,35 +326,7 @@ detect_lmstudio_model_dir() {
 }
 
 set_env_value() {
-  local key="$1"
-  local value="$2"
-  local escaped_value
-  local tmp
-
-  escaped_value="$(shell_quote "${value}")"
-  tmp="$(mktemp)"
-
-  if grep -q "^${key}=" "${ENV_FILE}"; then
-    awk -v key="${key}" -v value="${escaped_value}" '
-      BEGIN { replaced = 0 }
-      $0 ~ "^" key "=" {
-        print key "=" value
-        replaced = 1
-        next
-      }
-      { print }
-      END {
-        if (replaced == 0) {
-          print key "=" value
-        }
-      }
-    ' "${ENV_FILE}" > "${tmp}"
-  else
-    cp "${ENV_FILE}" "${tmp}"
-    printf '%s=%s\n' "${key}" "${escaped_value}" >> "${tmp}"
-  fi
-
-  mv "${tmp}" "${ENV_FILE}"
+  "${SCRIPT_DIR}/env-set.sh" "${ENV_FILE}" "$1" "$2"
 }
 
 configure_project_env() {
@@ -388,6 +363,7 @@ configure_project_env() {
   set_env_value OLLAMA_MODELS "${HOME}/.ollama/models"
   set_env_value MODEL_CLEAN_MIN_AGE_HOURS "1"
   set_env_value RAG_ENABLED "1"
+  [[ -n "$(env_value RAG_RUNTIME)" ]] || set_env_value RAG_RUNTIME "docker"
   [[ -n "$(env_value RAG_SOURCE_PATH)" ]] || set_env_value RAG_SOURCE_PATH '${OBSIDIAN_SHARED_PATH:-}'
   [[ -n "$(env_value RAG_INDEX_PATH)" ]] || set_env_value RAG_INDEX_PATH ".runtime/rag"
   [[ -n "$(env_value RAG_HOST)" ]] || set_env_value RAG_HOST "127.0.0.1"
@@ -425,7 +401,19 @@ configure_project_env() {
   [[ -n "$(env_value RAG_OCR_MIN_TEXT_CHARS)" ]] || set_env_value RAG_OCR_MIN_TEXT_CHARS "200"
   [[ -n "$(env_value RAG_OCR_MAX_PAGES)" ]] || set_env_value RAG_OCR_MAX_PAGES "25"
   [[ -n "$(env_value RAG_OCR_DPI)" ]] || set_env_value RAG_OCR_DPI "200"
-  [[ -n "$(env_value INSTALL_RAG_OCR)" ]] || set_env_value INSTALL_RAG_OCR "1"
+  [[ -n "$(env_value INSTALL_RAG_OCR)" ]] || set_env_value INSTALL_RAG_OCR "0"
+  [[ -n "$(env_value RAG_DOCKER_NAME)" ]] || set_env_value RAG_DOCKER_NAME "mlx-isolated-rag"
+  [[ -n "$(env_value RAG_DOCKER_PROJECT)" ]] || set_env_value RAG_DOCKER_PROJECT "mlx-isolated-rag"
+  [[ -n "$(env_value RAG_DOCKER_INDEX_PATH)" ]] || set_env_value RAG_DOCKER_INDEX_PATH ".runtime/rag-docker"
+  [[ -n "$(env_value RAG_API_IMAGE)" ]] || set_env_value RAG_API_IMAGE "python:3.12-slim"
+  [[ -n "$(env_value RAG_QDRANT_IMAGE)" ]] || set_env_value RAG_QDRANT_IMAGE "qdrant/qdrant:latest"
+  [[ -n "$(env_value RAG_TEI_IMAGE)" ]] || set_env_value RAG_TEI_IMAGE "ghcr.io/huggingface/text-embeddings-inference:cpu-latest"
+  [[ -n "$(env_value RAG_TIKA_IMAGE)" ]] || set_env_value RAG_TIKA_IMAGE "apache/tika:latest-full"
+  [[ -n "$(env_value RAG_DOCLING_IMAGE)" ]] || set_env_value RAG_DOCLING_IMAGE "quay.io/docling-project/docling-serve:latest"
+  [[ -n "$(env_value RAG_DOCKER_EMBEDDING_BACKEND)" ]] || set_env_value RAG_DOCKER_EMBEDDING_BACKEND "hash"
+  [[ -n "$(env_value RAG_DOCKER_START_TIMEOUT_SECONDS)" ]] || set_env_value RAG_DOCKER_START_TIMEOUT_SECONDS "600"
+  [[ -n "$(env_value INSTALL_RAG_HOST)" ]] || set_env_value INSTALL_RAG_HOST "0"
+  [[ -n "$(env_value RAG_AUTO_INDEX_ON_START)" ]] || set_env_value RAG_AUTO_INDEX_ON_START "1"
   [[ -n "$(env_value MATRIX_MODES)" ]] || set_env_value MATRIX_MODES "hermes/docker hermes/multipass openclaw/docker openclaw/multipass"
   [[ -n "$(env_value MATRIX_RAG_QUERY)" ]] || set_env_value MATRIX_RAG_QUERY "OpenClaw"
   [[ -n "$(env_value MATRIX_CHAT_TIMEOUT_SECONDS)" ]] || set_env_value MATRIX_CHAT_TIMEOUT_SECONDS "180"
@@ -462,18 +450,10 @@ configure_project_env() {
   set_env_value DOCKER_GATEWAY_API_PORT "8642"
   set_env_value OPENAI_BASE_URL_DOCKER "http://host.docker.internal:8000/v1"
   set_env_value ANTHROPIC_BASE_URL_DOCKER "http://host.docker.internal:8000"
-  [[ -n "$(env_value TAILSCALE_ENABLED)" ]] || set_env_value TAILSCALE_ENABLED "0"
-  [[ -n "$(env_value TAILSCALE_SERVE_ENABLED)" ]] || set_env_value TAILSCALE_SERVE_ENABLED "0"
-  [[ -n "$(env_value TAILSCALE_SERVE_MODE)" ]] || set_env_value TAILSCALE_SERVE_MODE "serve"
-  [[ -n "$(env_value TAILSCALE_DASHBOARD_TARGET)" ]] || set_env_value TAILSCALE_DASHBOARD_TARGET ""
-  [[ -n "$(env_value TAILSCALE_DASHBOARD_ORIGIN)" ]] || set_env_value TAILSCALE_DASHBOARD_ORIGIN ""
-  [[ -n "$(env_value TAILSCALE_HOSTNAME)" ]] || set_env_value TAILSCALE_HOSTNAME ""
-  [[ -n "$(env_value TAILSCALE_EXTRA_ARGS)" ]] || set_env_value TAILSCALE_EXTRA_ARGS ""
   set_env_value OPENCLAW_IMAGE "ghcr.io/openclaw/openclaw:latest"
   set_env_value OPENCLAW_PULL_POLICY "latest"
   set_env_value OPENCLAW_CONTROL_PORT "18789"
   set_env_value OPENCLAW_BRIDGE_PORT "18790"
-  [[ -n "$(env_value OPENCLAW_ALLOW_TAILSCALE_AUTH)" ]] || set_env_value OPENCLAW_ALLOW_TAILSCALE_AUTH "0"
   [[ -n "$(env_value OPENCLAW_CONTROL_ALLOWED_ORIGINS)" ]] || set_env_value OPENCLAW_CONTROL_ALLOWED_ORIGINS ""
   if is_placeholder_secret "$(env_value OPENCLAW_GATEWAY_TOKEN)"; then
     set_env_value OPENCLAW_GATEWAY_TOKEN "$(generate_local_api_key)"
@@ -520,7 +500,7 @@ Next:
   make models-search       # wraps: lms get --mlx
   make models-list         # wraps: lms ls --json
   make model-start-bg      # serves LM Studio model dir with oMLX
-  make rag-install         # local LanceDB/PDF/OCR RAG dependencies
+  make rag-up              # Dockerized RAG/OCR services
 
 Project env:
   ${ENV_FILE}

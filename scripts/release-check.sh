@@ -71,7 +71,7 @@ if [[ -n "${OPENAI_API_KEY:-}" && "${#OPENAI_API_KEY}" -ge 16 ]]; then
   fi
 fi
 
-for secret_name in TELEGRAM_BOT_TOKEN TAILSCALE_AUTH_KEY CLOUDFLARE_TUNNEL_TOKEN OPENCLAW_GATEWAY_TOKEN; do
+for secret_name in TELEGRAM_BOT_TOKEN CLOUDFLARE_TUNNEL_TOKEN OPENCLAW_GATEWAY_TOKEN; do
   secret_value="${!secret_name:-}"
   if [[ -n "${secret_value}" && "${#secret_value}" -ge 16 ]]; then
     if grep -RFIn --exclude-dir=.runtime --exclude-dir=.vm --exclude-dir=.cache --exclude=.env --exclude='*.log' -- "${secret_value}" .; then
@@ -100,19 +100,26 @@ fi
 if [[ "${RAG_ENABLED:-1}" == "1" || "${RAG_ENABLED:-1}" == "true" ]]; then
   if [[ "${SKIP_RAG_E2E:-0}" == "1" ]]; then
     echo "Skipping RAG smoke because SKIP_RAG_E2E=1"
-  elif [[ -n "${OBSIDIAN_SHARED_PATH:-}" || ( -n "${RAG_SOURCE_PATH:-}" && "${RAG_SOURCE_PATH:-}" != '${OBSIDIAN_SHARED_PATH}' && "${RAG_SOURCE_PATH:-}" != '${OBSIDIAN_SHARED_PATH:-}' ) ]]; then
-    log "Running RAG smoke"
-    make rag-install
-    make rag-index
-    QUERY="${RAG_SMOKE_QUERY:-test}" make rag-search
   else
-    echo "Skipping RAG smoke because OBSIDIAN_SHARED_PATH/RAG_SOURCE_PATH is not set"
+    log "Running RAG smoke (using mock source folder)"
+    make rag-install
+    
+    # Create a temporary directory in .runtime to avoid Docker Desktop mount permission issues on macOS
+    MOCK_DIR="${PROJECT_ROOT}/.runtime/omlx-rag-smoke"
+    mkdir -p "${MOCK_DIR}"
+    echo "This is a test document containing the secret keyword antigravities for RAG validation." > "${MOCK_DIR}/smoke-test-doc.txt"
+    
+    # Run index and search using the mock directory
+    RAG_SOURCE_PATH="${MOCK_DIR}" make rag-index
+    RAG_SOURCE_PATH="${MOCK_DIR}" QUERY="antigravities" make rag-search
+    
+    rm -rf "${MOCK_DIR}"
   fi
 fi
 
 if [[ "${SKIP_VM_E2E:-0}" != "1" ]]; then
   log "Running VM e2e smoke"
-  multipass info "${SELECTED_VM_NAME}" >/dev/null 2>&1 || fail "Multipass VM missing: ${SELECTED_VM_NAME}. Run make vm-create before release-check."
+  multipass info "${SELECTED_VM_NAME}" >/dev/null 2>&1 || fail "Multipass VM missing: ${SELECTED_VM_NAME}. Run make setup or ./scripts/vm-create.sh before release-check."
   case "${AGENT_RUNTIME}" in
     hermes)
       VM_NAME="${SELECTED_VM_NAME}" "${SCRIPT_DIR}/e2e-ready.sh"

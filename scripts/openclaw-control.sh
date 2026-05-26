@@ -53,9 +53,7 @@ else
 fi
 OPENCLAW_GATEWAY_TOKEN="${OVERRIDE_OPENCLAW_GATEWAY_TOKEN:-${OPENCLAW_GATEWAY_TOKEN:-}}"
 OPENCLAW_GATEWAY_BIND="${OPENCLAW_GATEWAY_BIND:-lan}"
-OPENCLAW_ALLOW_TAILSCALE_AUTH="${OPENCLAW_ALLOW_TAILSCALE_AUTH:-0}"
 OPENCLAW_CONTROL_ALLOWED_ORIGINS="${OPENCLAW_CONTROL_ALLOWED_ORIGINS:-}"
-TAILSCALE_DASHBOARD_ORIGIN="${TAILSCALE_DASHBOARD_ORIGIN:-}"
 OPENCLAW_OPENAI_BASE_URL_DOCKER="${OPENCLAW_OPENAI_BASE_URL_DOCKER:-${OPENAI_BASE_URL_DOCKER:-http://host.docker.internal:8000/v1}}"
 OPENCLAW_OPENAI_BASE_URL_GUEST="${OPENCLAW_OPENAI_BASE_URL_GUEST:-${OPENAI_BASE_URL_GUEST:-http://model-host.internal:8000/v1}}"
 RAG_BASE_URL_DOCKER="${RAG_BASE_URL_DOCKER:-http://rag-host.internal:8765}"
@@ -126,9 +124,6 @@ Control UI: $(openclaw_dashboard_base_url)
 Control UI auth URL: $(openclaw_dashboard_auth_url)
 OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
 EOF
-  if [[ "${OPENCLAW_ALLOW_TAILSCALE_AUTH}" == "1" || "${OPENCLAW_ALLOW_TAILSCALE_AUTH}" == "true" ]]; then
-    echo "Tailscale auth: enabled for OpenClaw Control UI"
-  fi
 }
 
 detect_model() {
@@ -213,31 +208,23 @@ chown -R 1000:1000 /home/node/.openclaw /home/node/.config/openclaw'
 }
 
 openclaw_config_json() {
-  local allow_tailscale=false
-  if [[ "${OPENCLAW_ALLOW_TAILSCALE_AUTH}" == "1" || "${OPENCLAW_ALLOW_TAILSCALE_AUTH}" == "true" ]]; then
-    allow_tailscale=true
-  fi
   jq -cn \
     --arg bind "${OPENCLAW_GATEWAY_BIND}" \
     --arg origin1 "http://localhost:${OPENCLAW_CONTROL_PORT}" \
     --arg origin2 "http://127.0.0.1:${OPENCLAW_CONTROL_PORT}" \
-    --arg tailscale_origin "${TAILSCALE_DASHBOARD_ORIGIN}" \
     --arg extra_origins "${OPENCLAW_CONTROL_ALLOWED_ORIGINS}" \
-    --argjson allow_tailscale "${allow_tailscale}" \
     --arg tg_token "${TELEGRAM_BOT_TOKEN}" \
     --arg tg_users "${TELEGRAM_ALLOWED_USERS}" '
     def split_origins:
       split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(. != ""));
     def origins:
       ([$origin1, $origin2]
-        + (if $tailscale_origin != "" then [$tailscale_origin] else [] end)
         + (if $extra_origins != "" then ($extra_origins | split_origins) else [] end))
       | unique;
     [
       {path:"gateway.mode", value:"local"},
       {path:"gateway.bind", value:$bind},
-      {path:"gateway.controlUi.allowedOrigins", value:origins},
-      {path:"gateway.auth.allowTailscale", value:$allow_tailscale}
+      {path:"gateway.controlUi.allowedOrigins", value:origins}
     ]
     + (if $tg_token != "" then [
       {path:"channels.telegram.enabled", value:true},
@@ -364,7 +351,7 @@ docker_create() {
   print_dashboard_access
 }
 
-  docker_start() {
+docker_start() {
   docker_create
   docker start "${OPENCLAW_DOCKER_NAME}" >/dev/null
   echo "OpenClaw Docker gateway running: ${OPENCLAW_DOCKER_NAME}"
@@ -451,7 +438,7 @@ vm_configure() {
   ensure_gateway_token
   detect_model
   [[ -n "${OPENAI_API_KEY}" ]] || die "OPENAI_API_KEY missing. Run make bootstrap or set it in .env."
-  vm_running || die "Multipass VM missing: ${VM_NAME}. Run make vm-create first."
+  vm_running || die "Multipass VM missing: ${VM_NAME}. Run make setup or ./scripts/vm-create.sh first."
   ensure_vm_model_host_alias
 
   vm_exec_root 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl jq lsof procps'

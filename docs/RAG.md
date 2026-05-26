@@ -1,63 +1,66 @@
 # Local RAG
 
-v0.4.0 adds a local RAG layer for Obsidian-backed agent knowledge.
+v0.4.0 provides a Docker-first local RAG layer for Obsidian vaults and personal documents.
 
-The source of truth is still your notes folder. The vector index under `.runtime/rag` is derived state and can be deleted or rebuilt at any time.
+Your shared folder is the source of truth. Everything under `.runtime/` is derived state and can be rebuilt.
 
-## Defaults
+## Runtime
+
+Public RAG runs in Docker Compose by default:
 
 ```bash
-RAG_ENABLED=1
-RAG_SOURCE_PATH=${OBSIDIAN_SHARED_PATH:-}
-RAG_INDEX_PATH=.runtime/rag
-RAG_HOST=127.0.0.1
-RAG_BIND_HOST=0.0.0.0
-RAG_PORT=8765
-RAG_EMBEDDING_MODEL=intfloat/multilingual-e5-small
-RAG_AUTO_INDEX=1
-RAG_WATCH_INTERVAL_SECONDS=20
-RAG_WATCH_DEBOUNCE_SECONDS=3
-RAG_OCR_TESSDATA_PATH=.runtime/tessdata
-RAG_OCR_LANGUAGE_SOURCE=https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main
+RAG_RUNTIME=docker
 ```
 
-The service runs on the host and is shared by all four agent modes:
+The compose stack uses prebuilt images:
 
-- Hermes on Multipass
-- Hermes on Docker
-- OpenClaw on Multipass
-- OpenClaw on Docker
+- `python:3.12-slim` for the small RAG API/indexer.
+- `qdrant/qdrant` for vector storage.
+- Hash embeddings in the RAG API by default, avoiding a heavyweight embedding image on Apple Silicon.
+- `quay.io/docling-project/docling-serve` for primary document parsing/OCR.
+- `apache/tika:latest-full` for broad fallback extraction and OCR.
 
-Sandboxes reach it at:
+The source folder is mounted read-only. Derived state is stored under `.runtime/`.
 
-```text
-http://rag-host.internal:8765
+`make rag-preflight` verifies that required images publish `linux/arm64` manifests before pulling them. `make rag-up` runs the same preflight before starting containers. TEI can be enabled later with `RAG_DOCKER_EMBEDDING_BACKEND=tei`, but it is not the default because current public TEI CPU tags do not provide a normal Apple Silicon `arm64` image.
+
+Host-side RAG is legacy-only. It is not installed by bootstrap or setup. Use it only with:
+
+```bash
+RAG_RUNTIME=host INSTALL_RAG_HOST=1
 ```
 
 ## Commands
 
 ```bash
-make rag-install
-make rag-index
+make rag-preflight
+make rag-up
 make rag-sync
-make rag-start
-make rag-watch-start
 make rag-search QUERY="project release notes"
 make rag-status
-make rag-stop
 make rag-doctor
+make rag-down
+make rag-logs
 ```
 
-`rag-index` is incremental by default: unchanged files are skipped, changed files are re-indexed, and deleted files are pruned.
-`rag-sync` runs one incremental index pass and starts the host RAG service.
-When `RAG_AUTO_INDEX=1`, `rag-start` also starts a lightweight watcher that re-indexes changed/deleted files after a short polling delay.
+`rag-sync` starts Docker RAG if needed, indexes the shared source folder, and keeps the API available at:
+
+```text
+http://127.0.0.1:8765
+```
+
+Agent sandboxes use:
+
+```text
+http://rag-host.internal:8765
+```
 
 ## Indexed Files
 
-Text, spreadsheet, PDF, and image extensions are indexed:
+Default extensions:
 
 ```text
-.md,.txt,.rst,.csv,.tsv,.json,.yaml,.yml,.toml,.xml,.html,.xlsx,.xlsm,.xls,.xlsb,.ods,.pdf,.png,.jpg,.jpeg,.tif,.tiff
+.md,.txt,.rst,.csv,.tsv,.json,.yaml,.yml,.toml,.xml,.html,.xlsx,.xlsm,.xls,.xlsb,.ods,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.doc,.docx,.ppt,.pptx
 ```
 
 Default excludes:
@@ -66,59 +69,29 @@ Default excludes:
 .git/**,.obsidian/**,node_modules/**,.trash/**,*.env,*.key,*.pem
 ```
 
-Files larger than `RAG_MAX_FILE_MB` are skipped. Spreadsheets use `RAG_SPREADSHEET_MAX_FILE_MB` (`50` by default).
+Text-like files are read directly by the RAG API. PDFs, images, and Office files are extracted through Docling first where possible and Tika as fallback.
 
-## Spreadsheets
+## Needed-Only OCR
 
-Excel/ODS files use a spreadsheet-specific extractor instead of flattening the workbook into one text blob.
+OCR is enabled as a capability, but it is only used when needed:
 
-- `.xlsx` and `.xlsm` use `openpyxl` for sheet visibility, formulas, comments, named ranges, and cached values.
-- `.xls`, `.xlsb`, `.ods`, and fallback reads use `python-calamine`.
-- Search results include spreadsheet metadata such as sheet name, cell range, row range, headers, and formula/comment flags.
-- Large sheets are chunked by row ranges. Defaults: `RAG_SPREADSHEET_MAX_ROWS_PER_CHUNK=50`, `RAG_SPREADSHEET_MAX_ROWS_FULL=5000`.
-- Hidden sheets are skipped unless `RAG_SPREADSHEET_INCLUDE_HIDDEN=1`.
+- Text PDFs are extracted without OCR first.
+- If PDF text is below `RAG_OCR_MIN_TEXT_CHARS`, scanned-PDF OCR is attempted.
+- Images always require OCR.
+- Office/text files do not trigger OCR.
 
-## PDF and OCR
-
-PDF files use PyMuPDF first. If the selectable text layer has at least `RAG_OCR_MIN_TEXT_CHARS` characters, OCR is not used.
-
-OCR is a needed-only fallback:
-
-- `RAG_OCR_ENABLED=1`
-- `RAG_OCR_MODE=needed`
-- `RAG_OCR_LANGUAGES=rus+eng+deu`
-- `RAG_OCR_MAX_PAGES=25`
-- `RAG_OCR_DPI=200`
-
-Image files always require OCR. If Tesseract or the requested languages are missing, only that file is skipped with an `ocr_required`/OCR error in the manifest; the rest of the index continues.
-
-`make bootstrap`, `make setup`, and `make rag-install` install OCR system dependencies by default on macOS when OCR is enabled:
-
-```bash
-make rag-install
-```
-
-The default install uses Homebrew for the `tesseract` binary, then downloads only the requested `.traineddata` language files into `.runtime/tessdata` from `RAG_OCR_LANGUAGE_SOURCE`. This avoids installing the full Homebrew language pack.
-
-Use `INSTALL_RAG_OCR=0 make rag-install` only for a lightweight environment that should skip OCR system dependencies. With OCR enabled, `make rag-doctor` reports missing Tesseract binaries or requested OCR languages as an issue.
+OCR runs inside parser containers, not on the macOS host.
 
 ## Agent Usage
 
-Agent environments receive a small CLI bridge:
+Hermes and OpenClaw receive a `rag-search` CLI bridge:
 
 ```bash
 rag-search "what did we decide about OpenClaw?"
-rag-search --json --top-k 5 "telegram daemon conflict"
+rag-search --json "telegram daemon conflict"
 ```
 
-This is intentionally explicit in v0.4.0. The agent should call `rag-search` before answering questions about local notes, Obsidian vault content, project knowledge, or personal documents. The project does not automatically inject note context into every prompt yet.
-
-The shared folder and the RAG index solve different problems:
-
-- `OBSIDIAN_SHARED_PATH` is the live source folder the agent can read and write as files.
-- `.runtime/rag` is a searchable derived index built from that source folder.
-
-Docker uses a live bind mount. Multipass should use `MULTIPASS_SHARED_MODE=mount` for a live host folder; `transfer` is only a snapshot fallback and is not suitable for no-manual-sync workflows.
+The agent should call this tool before answering questions about local notes, source documents, or project memory. The project does not automatically inject RAG context into every prompt.
 
 ## API
 
@@ -139,4 +112,4 @@ curl -fsS http://127.0.0.1:8765/search \
 
 ## Privacy
 
-Everything runs locally. No cloud APIs are used for indexing or search. The default embedding model is downloaded through Python package/model tooling into the local machine cache.
+The source folder is mounted read-only into Docker. Indexes, parser cache, embedding cache, and Qdrant storage stay local under `.runtime/`. No cloud APIs are used by default.

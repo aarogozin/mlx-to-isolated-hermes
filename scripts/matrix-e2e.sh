@@ -446,6 +446,7 @@ rag_control() {
   OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}" \
   RAG_SOURCE_PATH="${RAG_SOURCE_PATH:-}" \
   RAG_INDEX_PATH="${RAG_INDEX_PATH:-.runtime/rag}" \
+  RAG_RUNTIME="${RAG_RUNTIME:-docker}" \
   RAG_HOST="${RAG_HOST:-127.0.0.1}" \
   RAG_BIND_HOST="${RAG_BIND_HOST:-0.0.0.0}" \
   RAG_PORT="${RAG_PORT}" \
@@ -454,6 +455,7 @@ rag_control() {
 
 validate_synthetic_rag_manifest() {
   [[ "${MATRIX_RAG_SOURCE_MODE}" == "synthetic" ]] || return 0
+  [[ "${RAG_RUNTIME:-docker}" == "host" ]] || return 0
 
   local manifest="${RAG_INDEX_PATH}/manifest.json"
   [[ -f "${manifest}" ]] || die "synthetic RAG manifest missing: ${manifest}"
@@ -482,7 +484,7 @@ prepare_rag() {
   [[ -n "${source}" ]] || die "RAG is mandatory for matrix-e2e; set OBSIDIAN_SHARED_PATH or RAG_SOURCE_PATH."
   [[ -d "${source}" ]] || die "RAG source path does not exist: ${source}"
 
-  log "Preparing shared host RAG"
+  log "Preparing shared Docker RAG"
   "${SCRIPT_DIR}/rag-control.sh" stop >/dev/null 2>&1 || true
   rag_control stop >/dev/null 2>&1 || true
   rag_control install

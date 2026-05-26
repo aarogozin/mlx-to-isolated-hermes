@@ -1,12 +1,37 @@
 SHELL := /bin/bash
 
-.PHONY: bootstrap setup doctor clean-all release-check ci-check matrix-e2e \
+.PHONY: help bootstrap setup doctor clean-all release-check ci-check matrix-e2e \
 	models-search models-list models-sync models-doctor models-prune-incomplete model-select model-start-bg model-stop-bg model-check \
-	rag-install rag-index rag-sync rag-search rag-start rag-stop rag-status rag-doctor rag-watch-start rag-watch-stop rag-watch-status rag-watch-logs \
+	rag-install rag-preflight rag-index rag-sync rag-search rag-start rag-stop rag-status rag-doctor rag-up rag-down rag-logs \
 	agent-start agent-stop agent-restart agent-pause agent-switch agent-status agent-logs agent-shell agent-open-dashboard \
-	dashboard-remote-start dashboard-remote-stop dashboard-remote-status \
-	vm-create vm-start vm-stop vm-ssh vm-snapshot vm-reset vm-destroy vm-status \
-	shared-mounts-sync shared-mounts-status shared-mounts-check
+	vm-ssh vm-status shared-mounts-check
+
+help:
+	@printf '%s\n' 'mlx-to-isolated-agent commands'
+	@printf '\n%s\n' 'Setup and health:'
+	@printf '  %-24s %s\n' 'make bootstrap' 'Install/verify macOS host dependencies'
+	@printf '  %-24s %s\n' 'make setup' 'Interactive end-to-end setup wizard'
+	@printf '  %-24s %s\n' 'make doctor' 'Host dependency and service diagnostics'
+	@printf '  %-24s %s\n' 'make clean-all' 'Remove sandbox runtime state, keep secrets/models'
+	@printf '\n%s\n' 'Models:'
+	@printf '  %-24s %s\n' 'make models-search' 'Open LM Studio MLX model search'
+	@printf '  %-24s %s\n' 'make models-list' 'List local LM Studio models'
+	@printf '  %-24s %s\n' 'make model-select' 'Select the model served by oMLX'
+	@printf '  %-24s %s\n' 'make model-start-bg' 'Start host oMLX service'
+	@printf '\n%s\n' 'RAG:'
+	@printf '  %-24s %s\n' 'make rag-preflight' 'Verify Docker RAG images before pulling'
+	@printf '  %-24s %s\n' 'make rag-sync' 'Index source and start RAG service'
+	@printf '  %-24s %s\n' 'make rag-search QUERY=...' 'Search local RAG'
+	@printf '  %-24s %s\n' 'make rag-up' 'Start Dockerized RAG'
+	@printf '  %-24s %s\n' 'make rag-down' 'Stop Dockerized RAG'
+	@printf '\n%s\n' 'Agents:'
+	@printf '  %-24s %s\n' 'make agent-start' 'Start selected Hermes/OpenClaw stack'
+	@printf '  %-24s %s\n' 'make agent-status' 'Show active agent state'
+	@printf '  %-24s %s\n' 'make agent-open-dashboard' 'Open Dashboard/Control UI'
+	@printf '  %-24s %s\n' 'make agent-shell' 'Shell into selected sandbox'
+	@printf '\n%s\n' 'Release:'
+	@printf '  %-24s %s\n' 'make ci-check' 'Fast local CI-equivalent checks'
+	@printf '  %-24s %s\n' 'make release-check' 'Full local release gate'
 
 bootstrap:
 	./scripts/bootstrap-macos.sh
@@ -65,6 +90,9 @@ model-check:
 rag-install:
 	./scripts/rag-control.sh install
 
+rag-preflight:
+	./scripts/rag-control.sh preflight
+
 rag-index:
 	./scripts/rag-control.sh index
 
@@ -87,17 +115,14 @@ rag-status:
 rag-doctor:
 	./scripts/rag-control.sh doctor
 
-rag-watch-start:
-	./scripts/rag-control.sh watch-start
+rag-up:
+	RAG_RUNTIME=docker ./scripts/rag-control.sh start
 
-rag-watch-stop:
-	./scripts/rag-control.sh watch-stop
+rag-down:
+	RAG_RUNTIME=docker ./scripts/rag-control.sh stop
 
-rag-watch-status:
-	./scripts/rag-control.sh watch-status
-
-rag-watch-logs:
-	./scripts/rag-control.sh watch-logs
+rag-logs:
+	RAG_RUNTIME=docker ./scripts/rag-control.sh logs
 
 agent-start:
 	./scripts/agent-control.sh start
@@ -126,44 +151,11 @@ agent-shell:
 agent-open-dashboard:
 	./scripts/agent-control.sh open-dashboard
 
-dashboard-remote-start:
-	./scripts/dashboard-remote.sh tailscale-start
-
-dashboard-remote-stop:
-	./scripts/dashboard-remote.sh tailscale-stop
-
-dashboard-remote-status:
-	./scripts/dashboard-remote.sh tailscale-status
-
-vm-create:
-	./scripts/vm-create.sh
-
-vm-start:
-	./scripts/vm-control.sh start
-
-vm-stop:
-	./scripts/vm-control.sh stop
-
 vm-ssh:
 	./scripts/vm-control.sh ssh
 
-vm-snapshot:
-	./scripts/vm-control.sh snapshot
-
-vm-reset:
-	./scripts/vm-control.sh reset
-
-vm-destroy:
-	./scripts/vm-control.sh destroy
-
 vm-status:
 	./scripts/vm-control.sh status
-
-shared-mounts-sync:
-	./scripts/shared-mounts.sh sync
-
-shared-mounts-status:
-	./scripts/shared-mounts.sh status
 
 shared-mounts-check:
 	./scripts/shared-mounts-check.sh

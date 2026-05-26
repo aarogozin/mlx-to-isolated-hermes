@@ -428,33 +428,12 @@ configure_credentials() {
       ok "Telegram user ID: ${tg_uid}"
     fi
   fi
-
-  # ── Tailscale (optional) ──
-  printf "\n"
-  local ts_authkey
-  ts_authkey="$(env_get TAILSCALE_AUTH_KEY)"
-
-  if [[ -z "${ts_authkey}" ]]; then
-    printf "  ${DIM}Tailscale Auth Key allows the Multipass VM to automatically join your tailnet. Optional.${RESET}\n"
-    ts_authkey="$(prompt "Tailscale Auth Key (tskey-auth-...)" "")"
-    if [[ -n "${ts_authkey}" ]]; then
-      env_put TAILSCALE_ENABLED "1"
-      env_put TAILSCALE_AUTH_KEY "${ts_authkey}"
-      ok "Tailscale Auth Key saved"
-    else
-      info "Tailscale Key skipped — you can add TAILSCALE_AUTH_KEY to .env later"
-    fi
-  else
-    env_put TAILSCALE_ENABLED "1"
-    ok "Tailscale Auth Key already configured"
-  fi
 }
 
 # ── Step 5: Model selection ───────────────────────────────────────────────────
 SELECTED_MODEL=""
 RAG_SELECTED=0
 RAG_SMOKE_QUERY=""
-RAG_SEARCH_PREVIEW=""
 
 configure_model() {
   step "Model selection"
@@ -501,7 +480,7 @@ configure_model() {
 # ── Step 6: Optional local RAG ────────────────────────────────────────────────
 configure_rag() {
   step "Local RAG"
-  printf "  ${DIM}RAG indexes your Obsidian/text folder on the host and exposes it to ${AGENT_RUNTIME} through rag-search.${RESET}\n"
+  printf "  ${DIM}RAG indexes your Obsidian/documents folder and exposes it to ${AGENT_RUNTIME} through rag-search.${RESET}\n"
   printf "  ${DIM}It is optional, local-only, and can be rebuilt from source notes at any time.${RESET}\n"
 
   local idx
@@ -518,6 +497,20 @@ configure_rag() {
 
   RAG_SELECTED=1
   env_put RAG_ENABLED "1"
+
+  local rag_runtime install_rag_host
+  rag_runtime="$(env_get RAG_RUNTIME)"
+  rag_runtime="${rag_runtime:-docker}"
+  install_rag_host="$(env_get INSTALL_RAG_HOST)"
+  install_rag_host="${install_rag_host:-0}"
+  if [[ "${rag_runtime}" != "host" || "${install_rag_host}" != "1" ]]; then
+    rag_runtime="docker"
+  fi
+  if [[ "${rag_runtime}" == "docker" && "${HAVE_DOCKER}" -ne 1 ]]; then
+    die "Docker Desktop is required for Docker-first RAG. Start Docker Desktop or set RAG_RUNTIME=host and INSTALL_RAG_HOST=1 for the legacy host path."
+  fi
+  env_put RAG_RUNTIME "${rag_runtime}"
+  ok "RAG runtime: ${rag_runtime}"
 
   local source_path
   source_path="$(env_get RAG_SOURCE_PATH)"
@@ -554,16 +547,38 @@ configure_rag() {
   substep "Installing RAG dependencies..."
   "${SCRIPT_DIR}/rag-control.sh" install
 
-  substep "Indexing local knowledge source..."
-  "${SCRIPT_DIR}/rag-control.sh" index
-
-  substep "Starting host RAG service and auto-index watcher..."
+  if [[ "${rag_runtime}" == "docker" ]]; then
+    substep "Starting Dockerized RAG service..."
+  else
+    substep "Starting host RAG service and auto-index watcher..."
+  fi
   "${SCRIPT_DIR}/rag-control.sh" start
 
-  substep "Verifying host RAG search..."
-  RAG_SEARCH_PREVIEW="$("${SCRIPT_DIR}/rag-control.sh" search "${RAG_SMOKE_QUERY}" | sed -n '1,12p')"
-  printf '%s\n' "${RAG_SEARCH_PREVIEW}" | sed 's/^/     /'
-  ok "RAG host search works"
+  substep "Indexing local knowledge source (starting in background)..."
+  local log_file=".runtime/rag/rag-index.log"
+  if [[ "${rag_runtime}" == "docker" ]]; then
+    log_file=".runtime/rag-docker/rag-index.log"
+  fi
+  mkdir -p "$(dirname "${log_file}")"
+  nohup "${SCRIPT_DIR}/rag-control.sh" index > "${log_file}" 2>&1 &
+  info "Indexing is running asynchronously. Check progress: tail -f ${log_file} or make rag-logs"
+
+  substep "Verifying RAG search API..."
+  local attempts=5
+  local i
+  local api_online=0
+  for ((i=1; i<=attempts; i++)); do
+    if "${SCRIPT_DIR}/rag-control.sh" search "${RAG_SMOKE_QUERY}" >/dev/null 2>&1; then
+      api_online=1
+      break
+    fi
+    sleep 1
+  done
+  if [[ "${api_online}" -eq 1 ]]; then
+    ok "RAG search API is online"
+  else
+    warn "RAG search API did not respond within ${attempts}s, but indexing is running in background."
+  fi
 }
 
 # ── Step 7: Start oMLX ────────────────────────────────────────────────────────
@@ -769,7 +784,7 @@ DONE
   printf "  ${DIM}  make doctor               ${RESET}# full system health check\n"
   printf "  ${DIM}  make model-select         ${RESET}# switch local model\n"
   printf "  ${DIM}  make rag-search QUERY=\"...\" ${RESET}# query local RAG\n"
-  printf "  ${DIM}  make rag-status           ${RESET}# RAG service and auto-index watcher\n"
+  printf "  ${DIM}  make rag-status           ${RESET}# RAG service status\n"
   if [[ "${BACKEND}" != "docker" ]]; then
     printf "  ${DIM}  make vm-ssh               ${RESET}# SSH into the agent VM\n"
     printf "  ${DIM}  make vm-status            ${RESET}# show VM status and IP\n"

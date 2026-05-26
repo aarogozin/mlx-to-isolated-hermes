@@ -73,16 +73,6 @@ port_listening() {
   lsof -nP -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1
 }
 
-# ── SSH tunnel helpers ────────────────────────────────────────────────────────
-
-_ssh_opts_array() {
-  printf '%s\0' \
-    -i "${VM_SSH_KEY}" \
-    -o BatchMode=yes \
-    -o ExitOnForwardFailure=yes \
-    -o StrictHostKeyChecking=accept-new \
-    -o UserKnownHostsFile="${KNOWN_HOSTS_FILE}"
-}
 
 tunnel_check() {
   local ip="$1"
@@ -147,7 +137,7 @@ start_vm_dashboard() {
 
 start_vm_tunnel() {
   mkdir -p "${RUNTIME_DIR}"
-  [[ -f "${VM_SSH_KEY}" ]] || die "VM SSH key missing: ${VM_SSH_KEY}. Run make vm-create first."
+  [[ -f "${VM_SSH_KEY}" ]] || die "VM SSH key missing: ${VM_SSH_KEY}. Run make setup or ./scripts/vm-create.sh first."
 
   local ip
   ip="$(get_vm_ip)"

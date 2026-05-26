@@ -42,7 +42,7 @@ die() {
 
 require_multipass_vm() {
   command -v multipass >/dev/null 2>&1 || die "multipass missing. Run make bootstrap first."
-  multipass info "${VM_NAME}" >/dev/null 2>&1 || die "Multipass instance missing: ${VM_NAME}. Run make vm-create first."
+  multipass info "${VM_NAME}" >/dev/null 2>&1 || die "Multipass instance missing: ${VM_NAME}. Run make setup or ./scripts/vm-create.sh first."
 }
 
 multipass_ip() {

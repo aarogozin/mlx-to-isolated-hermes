@@ -1,11 +1,17 @@
-# omlx_to_client
+# MLX Isolated Agent Stack
 
-Apple Silicon local-agent stack:
+Run local MLX models on an Apple Silicon Mac and connect them to an isolated agent sandbox.
 
-- LM Studio finds and downloads MLX models.
-- oMLX serves those models on the macOS host through an OpenAI-compatible API.
-- LanceDB can index your local Obsidian/text folder as a host-side RAG service.
-- Hermes or OpenClaw runs in an isolated Multipass VM or Docker container and connects back to the host model server.
+The host keeps the expensive pieces local: LM Studio downloads models, oMLX serves them through an OpenAI-compatible API, and an optional local RAG service indexes your notes and documents. The agent runs separately in Docker or Multipass.
+
+## What You Get
+
+- Local model serving with LM Studio + oMLX.
+- Hermes or OpenClaw running in Docker or a Multipass Ubuntu VM.
+- One active agent stack at a time, with safe switching prompts.
+- Optional local RAG over an Obsidian vault or documents folder.
+- PDF, image, spreadsheet, and text indexing with needed-only OCR.
+- Telegram and local web dashboard/control UI support.
 
 Version: `0.4.0`
 
@@ -18,272 +24,141 @@ make agent-status
 make agent-open-dashboard
 ```
 
-If LM Studio was just installed, launch it once before rerunning `make bootstrap`; this initializes the `lms` CLI.
+If LM Studio was just installed, launch it once before rerunning `make bootstrap`; that initializes the `lms` CLI.
 
-`make setup` also checks for already-running agent stacks before deploying. It can reuse the requested stack, pause/restart it, clean sandbox state, or pause a different active stack before switching. The wizard also asks whether to connect local RAG for this deployment. If selected, it installs RAG dependencies, indexes `OBSIDIAN_SHARED_PATH`, starts the host RAG service, and verifies `rag-search` from inside the chosen Hermes/OpenClaw sandbox.
+`make setup` is the main entrypoint. It asks for:
+
+- agent runtime: Hermes or OpenClaw;
+- sandbox backend: Docker or Multipass;
+- local model from LM Studio;
+- optional Telegram credentials;
+- optional RAG source folder and RAG runtime.
+
+Run `make help` for the public command list.
 
 ## Architecture
 
-Inference stays on macOS. The sandbox runs tools, package installs, documents, notes, browser tooling, and agent workflows.
-
 ```text
 macOS host
-  LM Studio -> downloaded MLX model catalog
-  oMLX      -> http://0.0.0.0:8000/v1 with Bearer auth
-  LanceDB   -> http://127.0.0.1:8765 local RAG over OBSIDIAN_SHARED_PATH
+  LM Studio       model download/catalog
+  oMLX            OpenAI-compatible model API on :8000
+  RAG service     Docker Compose API + Qdrant on :8765
 
-Multipass Ubuntu 24.04 ARM64 VMs
-  Hermes   -> HERMES_VM_NAME   -> http://model-host.internal:8000/v1
-  OpenClaw -> OPENCLAW_VM_NAME -> http://model-host.internal:8000/v1
-  RAG       -> http://rag-host.internal:8765
-
-Docker Desktop container
-  Hermes/OpenClaw -> http://host.docker.internal:8000/v1
-  RAG              -> http://rag-host.internal:8765
+Sandbox
+  Hermes/OpenClaw in Docker or Multipass
+  model API       http://model-host.internal:8000/v1
+  RAG API         http://rag-host.internal:8765
 ```
 
-Hermes and OpenClaw are both exposed through the same `agent-*` commands. Only one agent stack should run at a time. Interactive setup can pause the active stack and switch; direct `make agent-start` remains conservative unless `AGENT_CONFLICT_POLICY=pause` is set.
+Inference stays on the Mac. The sandbox is where the agent can install packages, work with shared files, and run tools.
 
-## Bootstrap
+## Supported Agent Modes
 
 ```bash
-make bootstrap
-make doctor
+AGENT_RUNTIME=hermes   SANDBOX_BACKEND=multipass make agent-start
+AGENT_RUNTIME=hermes   SANDBOX_BACKEND=docker    make agent-start
+AGENT_RUNTIME=openclaw SANDBOX_BACKEND=multipass make agent-start
+AGENT_RUNTIME=openclaw SANDBOX_BACKEND=docker    make agent-start
 ```
 
-Bootstrap installs or verifies Homebrew, LM Studio/`lms`, oMLX, Docker Desktop, Multipass, and core CLI tools. It creates `.env` from `.env.example` and generates a local API key for oMLX auth. `.env` is ignored by git.
+Only one stack should be active at a time. `make setup` detects existing stacks and offers to reuse, pause, reset, or abort. For non-interactive switching:
+
+```bash
+AGENT_RUNTIME=openclaw SANDBOX_BACKEND=multipass make agent-switch
+```
 
 ## Models
+
+Use LM Studio to discover and download MLX models, then sync the selected model into oMLX:
 
 ```bash
 make models-search
 make models-list
-make models-sync
-make models-doctor
-make models-prune-incomplete
 make model-select
 make model-start-bg
-make model-stop-bg
-make model-check
 ```
 
-`make models-sync` reads the LM Studio catalog, symlinks compatible MLX safetensors LLMs into `.runtime/omlx-models`, and writes `MODEL_DIR`/`MODEL_NAME` into `.env`.
+Model cleanup helpers can scan LM Studio, oMLX runtime links, and Ollama storage for incomplete downloads:
 
-The selected model becomes the active agent's default. All inference still goes through host oMLX.
-
-`make models-doctor` scans LM Studio, `.runtime/omlx-models`, and Ollama model storage for broken symlinks, temporary download artifacts, zero-byte blobs, invalid/truncated safetensors or GGUF files, and Ollama manifests with missing blobs. `make models-prune-incomplete` removes only safely identified incomplete artifacts older than `MODEL_CLEAN_MIN_AGE_HOURS` (`1` by default).
+```bash
+make models-doctor
+make models-prune-incomplete
+```
 
 ## Local RAG
 
-RAG is local-first and derived from your shared notes folder. The source stays human-editable, and the index can be deleted/rebuilt at any time.
+RAG is local-first and Docker-first. Your source folder remains the source of truth; `.runtime/` holds rebuildable Docker volumes and indexes.
 
 ```bash
-make rag-install
-make rag-index
+make rag-preflight
 make rag-sync
-make rag-start
-make rag-watch-start
-make rag-search QUERY="what did I decide about OpenClaw?"
+make rag-search QUERY="what did we decide about OpenClaw?"
 make rag-status
-make rag-stop
 ```
 
-The interactive setup wizard can run this flow for you and then smoke-test access from the selected Docker/Multipass agent environment.
+Indexed by default:
 
-Defaults:
+- Markdown, plain text, JSON/YAML/TOML/XML/HTML, CSV/TSV;
+- Office documents, Excel/ODS, PDFs, and images through containerized Docling/Tika;
+- scanned PDFs and images through needed-only OCR in parser containers.
 
-- source: `RAG_SOURCE_PATH=${OBSIDIAN_SHARED_PATH:-}`
-- index: `.runtime/rag`
-- service: `http://127.0.0.1:8765`
-- embeddings: `intfloat/multilingual-e5-small`
-- storage: LanceDB
+```bash
+RAG_RUNTIME=docker make rag-preflight
+RAG_RUNTIME=docker make rag-up
+RAG_RUNTIME=docker make rag-sync
+RAG_RUNTIME=docker make rag-search QUERY="release notes"
+RAG_RUNTIME=docker make rag-down
+```
 
-Spreadsheet files (`.xlsx`, `.xlsm`, `.xls`, `.xlsb`, `.ods`) are indexed with workbook-aware chunks: workbook summary, sheet summaries, row ranges, formulas, and comments. Search results include sheet/range metadata so the agent can point back to the relevant part of a workbook.
-
-PDF files are indexed through PyMuPDF. OCR is enabled by default as a capability, but it is a needed-only fallback for scanned PDFs and images; normal selectable-text PDFs do not invoke OCR. `make bootstrap`, `make setup`, and `make rag-install` install Tesseract support on macOS unless `INSTALL_RAG_OCR=0` is set. Requested OCR language data is stored under `.runtime/tessdata`.
-
-The sandbox gets a `rag-search` CLI bridge and `rag-host.internal` DNS alias. Hermes/OpenClaw can call `rag-search "query"` explicitly before answering questions about local notes, project knowledge, or Obsidian vault content. v0.4.0 does not inject RAG context automatically.
-
-`RAG_AUTO_INDEX=1` starts a host watcher with `make rag-start`; changed, created, and deleted source files are picked up after `RAG_WATCH_INTERVAL_SECONDS` plus debounce. Use `make rag-sync` for a one-shot index plus service start.
+Docker RAG uses prebuilt containers for parsing/OCR and vector storage, with lightweight local hash embeddings by default. The host does not install Tesseract, PyMuPDF, LanceDB, sentence-transformers, or Office parsers by default.
 
 See [docs/RAG.md](docs/RAG.md).
 
-## Multipass VM
-
-```bash
-make vm-create
-make agent-start
-make vm-ssh
-```
-
-Defaults:
-
-- Ubuntu Server 24.04 LTS ARM64
-- Hermes VM: `HERMES_VM_NAME=omlx-agent-ubuntu`
-- OpenClaw VM: `OPENCLAW_VM_NAME=omlx-openclaw-ubuntu`
-- `VM_CPUS=4`
-- `VM_MEMORY=8G`
-- `VM_DISK=80G`
-- `VM_SSH_USER=agent`
-- generated SSH key: `~/.ssh/omlx_agent_vm_ed25519`
-- current user public key: `~/.ssh/id_ed25519.pub`
-
-Snapshot/reset:
-
-```bash
-make vm-stop
-make vm-snapshot
-make vm-start
-make vm-reset
-make vm-destroy
-```
-
-`make vm-*` uses the selected `AGENT_RUNTIME`; override it when needed:
-
-```bash
-AGENT_RUNTIME=openclaw make vm-status
-AGENT_RUNTIME=hermes make vm-status
-```
-
-Multipass can only snapshot stopped instances, so the release workflow is stop -> snapshot -> start.
-
 ## Shared Folder
 
-If `OBSIDIAN_SHARED_PATH` is set, Multipass mounts that folder at `OBSIDIAN_GUEST_PATH` (`/mnt/obsidian` by default). The default `MULTIPASS_SHARED_MODE=mount` gives the VM the same live folder as the host. `transfer` remains a snapshot fallback for debugging, but it is not the normal no-manual-sync mode.
+Set `OBSIDIAN_SHARED_PATH` to the folder you want the agent and RAG to see. Docker uses a bind mount. Multipass uses a live mount by default.
 
 ```bash
-make shared-mounts-sync
-make shared-mounts-status
 make shared-mounts-check
 ```
 
-`shared-mounts-check` writes a temporary marker on the host, syncs the folder, verifies identical content inside the sandbox, and cleans up. Docker uses a live bind mount and also verifies write-back from the container.
+## Telegram and Dashboard
 
-Agent startup treats the shared folder as optional by default (`SHARED_MOUNTS_REQUIRED=0`). Set `SHARED_MOUNTS_REQUIRED=1` when startup should fail unless the folder is available.
-
-## Agent Commands
-
-Use these when you do not want to think about whether the active sandbox is Docker or Multipass:
-
-```bash
-make agent-start
-make agent-stop
-make agent-restart
-make agent-pause
-make agent-switch
-make agent-status
-make agent-logs
-make agent-shell
-make agent-open-dashboard
-```
-
-The commands read `AGENT_RUNTIME` and `SANDBOX_BACKEND` from `.env`.
-
-Supported combinations:
-
-- `AGENT_RUNTIME=hermes SANDBOX_BACKEND=multipass`
-- `AGENT_RUNTIME=hermes SANDBOX_BACKEND=docker`
-- `AGENT_RUNTIME=openclaw SANDBOX_BACKEND=multipass`
-- `AGENT_RUNTIME=openclaw SANDBOX_BACKEND=docker`
-
-`make agent-start` refuses to start a different combination while another agent is running. `make setup` shows the active stack before deploying and prompts to reuse, pause/restart, clean all sandbox state, continue anyway for advanced debugging, or abort. For non-interactive switching:
-
-```bash
-AGENT_RUNTIME=openclaw SANDBOX_BACKEND=multipass make agent-switch
-AGENT_RUNTIME=hermes SANDBOX_BACKEND=multipass make agent-switch
-```
-
-`make agent-switch` also saves the requested runtime/backend back into `.env`, so later `make vm-*` and `make agent-*` commands point at the same stack. `make agent-pause` stops the selected agent and stops its VM when the backend is Multipass. `FORCE=1 make clean-all` is the full destructive sandbox reset.
-
-For OpenClaw, `make agent-start`, `make setup`, and `make agent-open-dashboard` print both the local Control UI URL and the one-time bootstrap auth URL:
-
-```text
-http://127.0.0.1:18789/#token=<OPENCLAW_GATEWAY_TOKEN>
-```
-
-The token is generated into local `.env` and is intentionally ignored by git.
-
-## Docker Sandbox
-
-Docker uses official upstream images and connects to host oMLX through Docker Desktop networking. This repository does not build or publish a custom Docker image.
-
-```bash
-SANDBOX_BACKEND=docker make agent-start
-SANDBOX_BACKEND=docker make agent-status
-SANDBOX_BACKEND=docker make agent-shell
-```
-
-Hermes uses `nousresearch/hermes-agent:latest`. OpenClaw uses `ghcr.io/openclaw/openclaw:latest` and exposes the Control UI on `OPENCLAW_CONTROL_PORT` (`18789` by default).
-
-Docker uses named volumes for agent state/workspace. If `OBSIDIAN_SHARED_PATH` is set, it is bind-mounted to `OBSIDIAN_GUEST_PATH`.
-
-Do not install GUI Obsidian in Docker. Mount an Obsidian vault as files and let agent tools work with the notes directly. Telegram, Discord, and similar integrations should be configured through the agent gateway rather than desktop apps.
-
-## Clean Sandbox Reset
-
-```bash
-make clean-all
-FORCE=1 make clean-all
-```
-
-`clean-all` stops oMLX, Telegram gateways, dashboards/control UIs, Docker, and Multipass; then deletes both runtime VMs and Hermes/OpenClaw Docker sandbox volumes. It preserves `.env`, API keys, Telegram credentials, host dependencies, and LM Studio model files.
-
-## Telegram Gateway
-
-Create a Telegram bot with `@BotFather`, then put the token in `.env`:
+Add Telegram credentials to `.env`:
 
 ```bash
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_USER_ID=123456789
-TELEGRAM_ALLOWED_USERS=123456789
 ```
 
-Get your numeric Telegram user ID from `@userinfobot`. `TELEGRAM_USER_ID` is a local convenience shortcut; scripts map it into allowlists when `TELEGRAM_ALLOWED_USERS` and runtime-specific allowlists are empty.
-
-Start the active backend daemon:
+Then start the selected stack:
 
 ```bash
 make agent-start
-make agent-logs
-```
-
-## Dashboard Access
-
-Local dashboard:
-
-```bash
 make agent-open-dashboard
 ```
 
-Remote access is opt-in. Tailscale is disabled by default; set `TAILSCALE_ENABLED=1` or provide `TAILSCALE_AUTH_KEY` if you want VMs to join your tailnet during creation. For the host dashboard/control UI:
+Remote dashboard access is opt-in through Cloudflare Tunnel. See [docs/REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md).
+
+## Safety Notes
+
+- `.env` is ignored by git and should hold all local secrets.
+- Model files and RAG indexes stay local.
+- oMLX uses Bearer auth for local API access.
+- Docker and Multipass sandbox agent execution, but they are not a substitute for reviewing secrets and mounted folders.
+- `FORCE=1 make clean-all` removes sandbox runtime state but preserves `.env`, model downloads, and source documents.
+
+## Release Checks
 
 ```bash
-make dashboard-remote-start
-make dashboard-remote-status
-make dashboard-remote-stop
-```
-
-`TAILSCALE_SERVE_MODE=serve` is private to your tailnet. `TAILSCALE_SERVE_MODE=funnel` is public internet exposure and should be used only deliberately. Do not expose the dashboard by raw public port forwarding.
-
-See [docs/REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md).
-
-## Release Check
-
-```bash
-make release-check
+make ci-check
 SKIP_VM_E2E=1 SKIP_DOCKER_E2E=1 make release-check
 ```
 
-Release check runs shell/Python syntax, an English-only tracked-text scan, mocked shared-folder tests, RAG unit tests, host doctor/model API checks, optional RAG smoke, VM e2e, real shared-folder smoke, Docker e2e, and daemon status checks.
-
-## Local Matrix E2E
+For a full local sandbox matrix:
 
 ```bash
 make matrix-e2e
-MATRIX_MODES="hermes/docker" MATRIX_CLEAN_MODE=none make matrix-e2e
-MATRIX_RAG_SOURCE_MODE=env make matrix-e2e
 ```
 
-`matrix-e2e` is a destructive local sandbox smoke test. By default it runs `FORCE=1 clean-all` once, preserves `.env`, models, your real Obsidian vault, and `.runtime/rag`, disables Telegram only for child processes, creates a synthetic RAG vault/index under the run report directory, then checks Hermes/OpenClaw across Docker and Multipass. Use `MATRIX_RAG_SOURCE_MODE=env` to test your configured `OBSIDIAN_SHARED_PATH` instead. Reports are written under `.runtime/matrix-e2e/`.
-
-Future model provider work is tracked in [docs/PROVIDERS.md](docs/PROVIDERS.md).
+Provider roadmap: [docs/PROVIDERS.md](docs/PROVIDERS.md).

@@ -4,17 +4,16 @@
 
 ## 0.4.0 — 2026-05-25
 
-Local RAG preview for Obsidian-backed agent knowledge and personal documents.
+Docker-first local RAG preview for Obsidian-backed agent knowledge and personal documents.
 
-- Add host-side LanceDB RAG index and FastAPI search service under `.runtime/rag`.
-- Add manual incremental indexing for Obsidian/text files with metadata, headings, tags, and wikilinks.
-- Add workbook-aware spreadsheet indexing for Excel/ODS files with sheet, range, row, formula, and comment metadata.
-- Add PDF and image indexing with needed-only OCR fallback for scanned documents.
-- Install OCR support by default through Tesseract plus local `.runtime/tessdata` language files.
+- Add Docker Compose RAG using prebuilt Docling, Tika, Qdrant, TEI, and Python images.
+- Add local indexing for Obsidian/text files with metadata and source paths.
+- Add Office, PDF, image, and spreadsheet extraction through containerized parser services.
+- Add needed-only OCR fallback for scanned documents without installing host Tesseract by default.
 - Add `rag-*` Make targets for install, index, search, service lifecycle, and diagnostics.
-- Add interactive `make setup` RAG opt-in with host indexing and sandbox `rag-search` smoke verification.
+- Add interactive `make setup` RAG opt-in with Docker indexing and sandbox `rag-search` smoke verification.
 - Add setup preflight handling for already-running agent stacks before deployment.
-- Add local `make matrix-e2e` to smoke Hermes/OpenClaw across Docker/Multipass with shared host RAG.
+- Add local `make matrix-e2e` to smoke Hermes/OpenClaw across Docker/Multipass with shared Docker RAG.
 - Expose `rag-host.internal` to Multipass and Docker sandboxes, parallel to `model-host.internal`.
 - Install a small `rag-search` bridge into Hermes/OpenClaw environments so agents can query local notes explicitly.
 - Add English-only docs, RAG unit tests, OCR smoke tests, and release-check hooks.
@@ -30,7 +29,7 @@ OpenClaw runtime hardening and model artifact cleanup.
 - Harden OpenClaw Docker volumes, auth-secret storage, gateway token setup, and Control UI ports.
 - Harden OpenClaw Multipass install/start by adding the npm user prefix to PATH and using `openclaw gateway run`.
 - Restore `model-host.internal` automatically on VM start/reset and OpenClaw startup so switched VMs can always reach host oMLX.
-- Make Tailscale optional by default, add remote dashboard helpers, and print OpenClaw Control UI auth URLs with `OPENCLAW_GATEWAY_TOKEN`.
+- Add remote dashboard helpers and print OpenClaw Control UI auth URLs with `OPENCLAW_GATEWAY_TOKEN`.
 - Add `models-doctor` and `models-prune-incomplete` to scan LM Studio, oMLX runtime symlinks, and Ollama storage for incomplete downloads.
 - Add timeouts to shared-folder smoke cleanup so Multipass mount cleanup cannot hang release checks.
 - Update docs for the four supported agent/runtime combinations and model cleanup workflow.
@@ -39,7 +38,7 @@ OpenClaw runtime hardening and model artifact cleanup.
 
 Release hardening for the cleaned-up Multipass/Docker stack.
 
-- Make Multipass the only supported VM backend and remove VMware Fusion from active scripts, docs, diagnostics, and env defaults.
+- Make Multipass the supported VM backend and simplify active scripts, docs, diagnostics, and env defaults around that path.
 - Use the official `nousresearch/hermes-agent:latest` Docker image directly; remove the custom Dockerfile, Docker build command, and GHCR image workflow.
 - Shrink the public `Makefile` to the user-facing setup, model, agent, VM, shared-folder, and release commands.
 - Add `shared-mounts-check` and wire it into `release-check` so local release validation proves the shared folder can be synced and read from the sandbox.

@@ -26,17 +26,27 @@
 
    ```bash
    make shared-mounts-check
+   make rag-preflight
    make rag-install
-   make rag-index
+   make rag-up
+   make rag-sync
    make rag-search QUERY="release smoke"
    make rag-status
    ```
 
-   OCR smoke. `make rag-install` installs Tesseract on macOS by default when OCR is enabled and downloads requested language data into `.runtime/tessdata`; set `INSTALL_RAG_OCR=0` only for a lightweight local/CI run:
+   Stop the Docker RAG stack after the smoke when you do not want it left running:
 
    ```bash
-   make rag-install
-   RAG_OCR_ENABLED=1 scripts/test-rag-ocr-smoke.sh
+   RAG_RUNTIME=docker make rag-down
+   ```
+
+   OCR/document parsing runs inside Docker parser containers. Host Tesseract and host Python RAG dependencies are not installed by default.
+
+   Optional legacy host-RAG smoke:
+
+   ```bash
+   RAG_RUNTIME=host INSTALL_RAG_HOST=1 make rag-install
+   RAG_RUNTIME=host INSTALL_RAG_HOST=1 RAG_OCR_ENABLED=1 scripts/test-rag-ocr-smoke.sh
    ```
 
 7. Scan local model stores before release:
@@ -63,12 +73,12 @@
    AGENT_RUNTIME=openclaw make vm-status
    ```
 
-9. Stop, snapshot, and restart the Multipass VM:
+9. Optional Multipass snapshot check through the low-level VM script:
 
    ```bash
-   make vm-stop
-   make vm-snapshot
-   make vm-start
+   ./scripts/vm-control.sh stop
+   ./scripts/vm-control.sh snapshot
+   ./scripts/vm-control.sh start
    ```
 
 10. Run final release gate:

@@ -17,10 +17,19 @@ def tracked_files() -> list[Path]:
     return [Path(line) for line in output.splitlines() if line.strip()]
 
 
+def is_binary(path: Path) -> bool:
+    try:
+        with path.open("rb") as f:
+            chunk = f.read(1024)
+            return b"\x00" in chunk
+    except Exception:
+        return True
+
+
 def main() -> int:
     found = False
     for path in tracked_files():
-        if not path.is_file():
+        if not path.is_file() or is_binary(path):
             continue
         text = path.read_bytes().decode("utf-8", errors="ignore")
         for line_number, line in enumerate(text.splitlines(), start=1):

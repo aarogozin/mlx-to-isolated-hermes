@@ -15,7 +15,7 @@ require_vm_ready() {
   command -v multipass >/dev/null 2>&1 \
     || { printf 'ERROR: multipass not found. Run make bootstrap.\n' >&2; return 1; }
   multipass info "${name}" >/dev/null 2>&1 \
-    || { printf 'ERROR: Multipass VM "%s" not found. Run make vm-create.\n' "${name}" >&2; return 1; }
+    || { printf 'ERROR: Multipass VM "%s" not found. Run make setup or ./scripts/vm-create.sh.\n' "${name}" >&2; return 1; }
 }
 
 get_vm_ip() {

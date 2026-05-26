@@ -141,11 +141,31 @@ sudo -Hu "${AGENT_USER}" env \
   bash -c '
     set -euo pipefail
     export PATH="$HOME/.local/bin:$PATH"
+    install_dir="$HOME/.hermes/hermes-agent"
     if command -v hermes >/dev/null 2>&1; then
+      if ! grep -q "VIRTUAL_ENV" "$HOME/.local/bin/hermes" 2>/dev/null; then
+        mkdir -p "$HOME/.local/bin"
+        cat > "$HOME/.local/bin/hermes" <<EOF
+#!/usr/bin/env bash
+unset PYTHONPATH PYTHONHOME
+export HERMES_HOME="\${HERMES_HOME:-\$HOME/.hermes}"
+export VIRTUAL_ENV="$install_dir/venv"
+exec "$install_dir/venv/bin/hermes" "\$@"
+EOF
+        chmod +x "$HOME/.local/bin/hermes"
+      fi
+      if [[ -f "$install_dir/venv/bin/hermes-update" ]] && ! grep -q "VIRTUAL_ENV" "$HOME/.local/bin/hermes-update" 2>/dev/null; then
+        cat > "$HOME/.local/bin/hermes-update" <<EOF
+#!/usr/bin/env bash
+unset PYTHONPATH PYTHONHOME
+export HERMES_HOME="\${HERMES_HOME:-\$HOME/.hermes}"
+export VIRTUAL_ENV="$install_dir/venv"
+exec "$install_dir/venv/bin/hermes-update" "\$@"
+EOF
+        chmod +x "$HOME/.local/bin/hermes-update"
+      fi
       exit 0
     fi
-
-    install_dir="$HOME/.hermes/hermes-agent"
     archive_url="https://github.com/NousResearch/hermes-agent/archive/refs/heads/${HERMES_REF}.tar.gz"
     work_dir="$(mktemp -d)"
     cleanup() {
@@ -203,9 +223,21 @@ sudo -Hu "${AGENT_USER}" env \
 #!/usr/bin/env bash
 unset PYTHONPATH PYTHONHOME
 export HERMES_HOME="\${HERMES_HOME:-\$HOME/.hermes}"
+export VIRTUAL_ENV="$install_dir/venv"
 exec "$install_dir/venv/bin/hermes" "\$@"
 EOF
         chmod +x "$HOME/.local/bin/hermes"
+
+        if [[ -f "$install_dir/venv/bin/hermes-update" ]]; then
+          cat > "$HOME/.local/bin/hermes-update" <<EOF
+#!/usr/bin/env bash
+unset PYTHONPATH PYTHONHOME
+export HERMES_HOME="\${HERMES_HOME:-\$HOME/.hermes}"
+export VIRTUAL_ENV="$install_dir/venv"
+exec "$install_dir/venv/bin/hermes-update" "\$@"
+EOF
+          chmod +x "$HOME/.local/bin/hermes-update"
+        fi
 
         if [[ -f "$install_dir/tools/skills_sync.py" ]]; then
           "$install_dir/venv/bin/python" "$install_dir/tools/skills_sync.py" || true

@@ -718,74 +718,78 @@ def extract_openpyxl_spreadsheet(path: Path) -> tuple[dict[str, Any], list[Chunk
     include_hidden = env_bool("RAG_SPREADSHEET_INCLUDE_HIDDEN", False)
     value_wb = openpyxl.load_workbook(path, read_only=False, data_only=True)
     formula_wb = openpyxl.load_workbook(path, read_only=False, data_only=False)
-    chunks: list[Chunk] = []
-    sheet_summaries = []
-
-    for sheet_name in value_wb.sheetnames:
-        value_ws = value_wb[sheet_name]
-        formula_ws = formula_wb[sheet_name]
-        hidden = formula_ws.sheet_state != "visible"
-        if hidden and not include_hidden:
-            continue
-
-        raw_rows: list[tuple[int, list[str]]] = []
-        for row in value_ws.iter_rows():
-            raw_rows.append((row[0].row if row else len(raw_rows) + 1, [stringify_cell(cell.value) for cell in row]))
-        rows, first_col = trim_sheet_rows(raw_rows)
-
-        formulas: list[str] = []
-        comments: list[str] = []
-        for row in formula_ws.iter_rows():
-            for cell in row:
-                value = cell.value
-                if isinstance(value, str) and value.startswith("="):
-                    formulas.append(f"{cell.coordinate}: {value}")
-                if cell.comment and cell.comment.text:
-                    comments.append(f"{cell.coordinate}: {cell.comment.text.strip()}")
-
-        sheet_summaries.append(
-            f"{sheet_name} ({'hidden' if hidden else 'visible'}, rows={max(0, len(rows) - 1)}, columns={max((len(row) for _, row in rows), default=0)})"
-        )
-        chunks.extend(
-            spreadsheet_sheet_chunks(
-                path,
-                sheet_name=sheet_name,
-                rows=rows,
-                first_col=first_col,
-                hidden=hidden,
-                formulas=formulas,
-                comments=comments,
-            )
-        )
-
-    defined_names = []
     try:
-        for name in formula_wb.defined_names.values():
-            defined_names.append(str(name))
-    except Exception:
-        defined_names = []
+        chunks: list[Chunk] = []
+        sheet_summaries = []
 
-    metadata = {
-        "title": path.stem,
-        "frontmatter": {
-            "extractor": "openpyxl",
-            "workbook_sheets": value_wb.sheetnames,
-            "defined_names": defined_names,
-        },
-        "tags": [],
-        "links": [],
-        "headings": [f"Workbook: {path.name}", *sheet_summaries],
-    }
-    if chunks:
-        workbook_text = (
-            f"Spreadsheet workbook: {path.name}\n"
-            f"Extractor: openpyxl\n"
-            f"Sheets:\n- " + "\n- ".join(sheet_summaries)
-        )
-        if defined_names:
-            workbook_text += "\nNamed ranges:\n- " + "\n- ".join(defined_names)
-        chunks.insert(0, Chunk(workbook_text, "Workbook summary", source_type="spreadsheet"))
-    return metadata, chunks
+        for sheet_name in value_wb.sheetnames:
+            value_ws = value_wb[sheet_name]
+            formula_ws = formula_wb[sheet_name]
+            hidden = formula_ws.sheet_state != "visible"
+            if hidden and not include_hidden:
+                continue
+
+            raw_rows: list[tuple[int, list[str]]] = []
+            for row in value_ws.iter_rows():
+                raw_rows.append((row[0].row if row else len(raw_rows) + 1, [stringify_cell(cell.value) for cell in row]))
+            rows, first_col = trim_sheet_rows(raw_rows)
+
+            formulas: list[str] = []
+            comments: list[str] = []
+            for row in formula_ws.iter_rows():
+                for cell in row:
+                    value = cell.value
+                    if isinstance(value, str) and value.startswith("="):
+                        formulas.append(f"{cell.coordinate}: {value}")
+                    if cell.comment and cell.comment.text:
+                        comments.append(f"{cell.coordinate}: {cell.comment.text.strip()}")
+
+            sheet_summaries.append(
+                f"{sheet_name} ({'hidden' if hidden else 'visible'}, rows={max(0, len(rows) - 1)}, columns={max((len(row) for _, row in rows), default=0)})"
+            )
+            chunks.extend(
+                spreadsheet_sheet_chunks(
+                    path,
+                    sheet_name=sheet_name,
+                    rows=rows,
+                    first_col=first_col,
+                    hidden=hidden,
+                    formulas=formulas,
+                    comments=comments,
+                )
+            )
+
+        defined_names = []
+        try:
+            for name in formula_wb.defined_names.values():
+                defined_names.append(str(name))
+        except Exception:
+            defined_names = []
+
+        metadata = {
+            "title": path.stem,
+            "frontmatter": {
+                "extractor": "openpyxl",
+                "workbook_sheets": value_wb.sheetnames,
+                "defined_names": defined_names,
+            },
+            "tags": [],
+            "links": [],
+            "headings": [f"Workbook: {path.name}", *sheet_summaries],
+        }
+        if chunks:
+            workbook_text = (
+                f"Spreadsheet workbook: {path.name}\n"
+                f"Extractor: openpyxl\n"
+                f"Sheets:\n- " + "\n- ".join(sheet_summaries)
+            )
+            if defined_names:
+                workbook_text += "\nNamed ranges:\n- " + "\n- ".join(defined_names)
+            chunks.insert(0, Chunk(workbook_text, "Workbook summary", source_type="spreadsheet"))
+        return metadata, chunks
+    finally:
+        value_wb.close()
+        formula_wb.close()
 
 
 def extract_calamine_spreadsheet(path: Path) -> tuple[dict[str, Any], list[Chunk]]:
@@ -1573,6 +1577,7 @@ def self_test() -> None:
             hidden.append(["Secret"])
             hidden.append(["Should not index"])
             wb.save(path)
+            wb.close()
             previous = dict(os.environ)
             try:
                 os.environ["RAG_SPREADSHEET_INCLUDE_HIDDEN"] = "0"
