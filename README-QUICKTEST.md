@@ -1,8 +1,8 @@
 # Quick Test Guide — omlx_to_client
 
-Быстрый прогон стека на Apple Silicon Mac.
+Fast local smoke tests for an Apple Silicon Mac.
 
-## Интерактивный путь
+## Interactive Path
 
 ```bash
 make bootstrap
@@ -11,11 +11,13 @@ make agent-status
 make agent-open-dashboard
 ```
 
-`make setup` выбирает runtime (`hermes` или `openclaw`), backend (`multipass` или `docker`), Telegram credentials из `.env`, локальную MLX-модель из LM Studio и запускает стек.
+`make setup` chooses the agent runtime (`hermes` or `openclaw`), sandbox backend (`multipass` or `docker`), Telegram credentials from `.env`, a local MLX model from LM Studio, and then starts the selected stack.
 
-В wizard также появится опциональный шаг RAG: подключить `OBSIDIAN_SHARED_PATH`, проиндексировать заметки, запустить host RAG service и проверить `rag-search` уже внутри выбранного Docker/Multipass окружения.
+The wizard also checks for already-running agent stacks. If one is active, it lets you reuse it, pause/restart it, clean all sandbox state, continue anyway for advanced debugging, or abort.
 
-## Ручной Multipass smoke
+The optional RAG step connects `OBSIDIAN_SHARED_PATH`, indexes the source folder, starts the host RAG service and watcher, then verifies `rag-search` from inside the selected Docker/Multipass environment.
+
+## Multipass Smoke
 
 ```bash
 make doctor
@@ -30,11 +32,11 @@ make agent-status
 make shared-mounts-check
 ```
 
-Если `OBSIDIAN_SHARED_PATH` не задан, `shared-mounts-check` честно пропустит проверку.
+If `OBSIDIAN_SHARED_PATH` is unset, `shared-mounts-check` skips with a clear message.
 
-## RAG smoke
+## RAG Smoke
 
-Если `OBSIDIAN_SHARED_PATH` указывает на Obsidian vault или папку с текстами:
+If `OBSIDIAN_SHARED_PATH` points to an Obsidian vault or another local documents folder:
 
 ```bash
 make rag-install
@@ -42,15 +44,17 @@ make rag-index
 make rag-sync
 make rag-start
 make rag-watch-start
-make rag-search QUERY="проверочный запрос"
+make rag-search QUERY="release smoke"
 make rag-status
 ```
 
-Агенты получают `rag-search` внутри Docker/Multipass и ходят к host-сервису через `rag-host.internal:8765`. При `RAG_AUTO_INDEX=1` команда `make rag-start` также поднимает watcher, который автоматически переиндексирует изменения в `OBSIDIAN_SHARED_PATH` с небольшим лагом.
+Agents receive a `rag-search` bridge inside Docker/Multipass and connect to the host service through `rag-host.internal:8765`. With `RAG_AUTO_INDEX=1`, `make rag-start` also runs a lightweight watcher that picks up source changes after a short polling delay.
 
-## Docker smoke
+PDFs, images, spreadsheets, and text-like files are indexed by default. OCR is enabled as a capability, but `RAG_OCR_MODE=needed` means normal selectable-text PDFs do not invoke OCR. `make rag-install` installs Tesseract and downloads only the requested OCR language data into `.runtime/tessdata`.
 
-Docker использует официальные образы: `nousresearch/hermes-agent:latest` для Hermes и `ghcr.io/openclaw/openclaw:latest` для OpenClaw. Локальный image в этом проекте не собирается.
+## Docker Smoke
+
+Docker uses official upstream images: `nousresearch/hermes-agent:latest` for Hermes and `ghcr.io/openclaw/openclaw:latest` for OpenClaw. This project does not build a local agent image.
 
 ```bash
 SANDBOX_BACKEND=docker make agent-start
@@ -58,22 +62,22 @@ SANDBOX_BACKEND=docker make agent-status
 SANDBOX_BACKEND=docker make agent-shell
 ```
 
-Низкоуровневый Docker e2e остался script-командой:
+Low-level Docker e2e remains available as a script command:
 
 ```bash
 ./scripts/docker-e2e.sh
 ```
 
-## Release gate
+## Release Gate
 
 ```bash
 make release-check
 SKIP_VM_E2E=1 SKIP_DOCKER_E2E=1 make release-check
 ```
 
-`release-check` делает shell/Python syntax, mock-тест shared-folder логики, RAG unit tests, host doctor/model check, optional RAG smoke, VM e2e, shared-folder smoke, Docker e2e, Telegram/dashboard status.
+`release-check` runs shell/Python syntax checks, mocked shared-folder tests, RAG unit tests, host doctor/model checks, optional RAG smoke, VM e2e, shared-folder smoke, Docker e2e, daemon status checks, and an English-only tracked-text scan.
 
-## Local matrix e2e
+## Local Matrix E2E
 
 ```bash
 make matrix-e2e
@@ -81,9 +85,9 @@ MATRIX_MODES="hermes/docker" MATRIX_CLEAN_MODE=none make matrix-e2e
 MATRIX_RAG_SOURCE_MODE=env make matrix-e2e
 ```
 
-Matrix e2e локально прогоняет Hermes/OpenClaw в Docker/Multipass с одним общим host RAG. По умолчанию делает `FORCE=1 clean-all` один раз, не трогает `.env`, модели и твой реальный Obsidian/RAG source, а для проверки создает synthetic vault/index внутри `.runtime/matrix-e2e/<run>/`. Telegram отключается только для дочерних процессов. Для проверки реального vault используй `MATRIX_RAG_SOURCE_MODE=env`.
+`matrix-e2e` locally checks Hermes/OpenClaw across Docker/Multipass against one shared host RAG service. By default it runs `FORCE=1 clean-all` once, preserves `.env`, model stores, and your real Obsidian/RAG source, creates a synthetic vault/index inside `.runtime/matrix-e2e/<run>/`, and disables Telegram only for child processes. Use `MATRIX_RAG_SOURCE_MODE=env` to test your configured `OBSIDIAN_SHARED_PATH`.
 
-## Полезные команды
+## Useful Commands
 
 ```bash
 make clean-all
@@ -103,14 +107,14 @@ make vm-snapshot
 make vm-reset
 ```
 
-## Структура
+## Project Layout
 
 ```text
 scripts/
   setup.sh                 main interactive entrypoint
   bootstrap-macos.sh       host dependency bootstrap
   vm-common.sh             Multipass guest helpers
-  vm-create-multipass.sh   Ubuntu 24.04 ARM64 VM create
+  vm-create-multipass.sh   Ubuntu 24.04 ARM64 VM creation
   agent-control.sh         unified Hermes/OpenClaw control
   openclaw-control.sh      OpenClaw Docker/Multipass runtime control
   matrix-e2e.sh            local four-mode sandbox/RAG smoke

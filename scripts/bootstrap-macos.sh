@@ -161,6 +161,45 @@ EOF
   return 1
 }
 
+truthy() {
+  case "${1:-}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+install_rag_ocr_languages() {
+  local langs="${RAG_OCR_LANGUAGES:-$(env_value RAG_OCR_LANGUAGES)}"
+  local tessdata_path="${RAG_OCR_TESSDATA_PATH:-$(env_value RAG_OCR_TESSDATA_PATH)}"
+  local language_source="${RAG_OCR_LANGUAGE_SOURCE:-$(env_value RAG_OCR_LANGUAGE_SOURCE)}"
+  langs="${langs:-rus+eng+deu}"
+  tessdata_path="${tessdata_path:-.runtime/tessdata}"
+  language_source="${language_source:-https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main}"
+
+  case "${tessdata_path}" in
+    /*) ;;
+    *) tessdata_path="${PROJECT_ROOT}/${tessdata_path}" ;;
+  esac
+
+  mkdir -p "${tessdata_path}"
+
+  local lang file tmp source
+  IFS='+' read -r -a lang_parts <<< "${langs}"
+  for lang in "${lang_parts[@]}"; do
+    [[ -n "${lang}" ]] || continue
+    file="${tessdata_path}/${lang}.traineddata"
+    if [[ -s "${file}" ]]; then
+      printf 'ok OCR language: %s\n' "${lang}"
+      continue
+    fi
+    source="${language_source%/}/${lang}.traineddata"
+    tmp="${file}.tmp"
+    log "Installing OCR language: ${lang}"
+    curl -fL --retry 3 --connect-timeout 20 -o "${tmp}" "${source}"
+    mv "${tmp}" "${file}"
+  done
+}
+
 ensure_tap() {
   local tap="$1"
   local url="$2"
@@ -219,6 +258,20 @@ Or download Canonical Multipass for macOS from:
     fi
   else
     brew_install_formula jundot/omlx/omlx
+  fi
+
+  local rag_ocr_enabled install_rag_ocr
+  rag_ocr_enabled="${RAG_OCR_ENABLED:-$(env_value RAG_OCR_ENABLED)}"
+  rag_ocr_enabled="${rag_ocr_enabled:-1}"
+  install_rag_ocr="${INSTALL_RAG_OCR:-$(env_value INSTALL_RAG_OCR)}"
+  install_rag_ocr="${install_rag_ocr:-1}"
+
+  if truthy "${rag_ocr_enabled}" && truthy "${install_rag_ocr}"; then
+    log "Installing RAG OCR system dependencies"
+    brew_install_formula tesseract
+    install_rag_ocr_languages
+  else
+    printf 'ok rag OCR system deps: skipped\n'
   fi
 }
 
@@ -345,15 +398,34 @@ configure_project_env() {
   [[ -n "$(env_value RAG_BASE_URL_DOCKER)" ]] || set_env_value RAG_BASE_URL_DOCKER "http://rag-host.internal:8765"
   [[ -n "$(env_value RAG_EMBEDDING_MODEL)" ]] || set_env_value RAG_EMBEDDING_MODEL "intfloat/multilingual-e5-small"
   [[ -n "$(env_value RAG_EMBEDDING_BACKEND)" ]] || set_env_value RAG_EMBEDDING_BACKEND "sentence-transformers"
-  [[ -n "$(env_value RAG_TEXT_EXTENSIONS)" ]] || set_env_value RAG_TEXT_EXTENSIONS ".md,.txt,.rst,.csv,.tsv,.json,.yaml,.yml,.toml,.xml,.html"
+  [[ -n "$(env_value RAG_TEXT_EXTENSIONS)" ]] || set_env_value RAG_TEXT_EXTENSIONS ".md,.txt,.rst,.csv,.tsv,.json,.yaml,.yml,.toml,.xml,.html,.xlsx,.xlsm,.xls,.xlsb,.ods,.pdf,.png,.jpg,.jpeg,.tif,.tiff"
   [[ -n "$(env_value RAG_EXCLUDE_GLOBS)" ]] || set_env_value RAG_EXCLUDE_GLOBS ".git/**,.obsidian/**,node_modules/**,.trash/**,*.env,*.key,*.pem"
   [[ -n "$(env_value RAG_MAX_FILE_MB)" ]] || set_env_value RAG_MAX_FILE_MB "10"
+  [[ -n "$(env_value RAG_DOCUMENT_MAX_FILE_MB)" ]] || set_env_value RAG_DOCUMENT_MAX_FILE_MB "50"
   [[ -n "$(env_value RAG_CHUNK_TOKENS)" ]] || set_env_value RAG_CHUNK_TOKENS "800"
   [[ -n "$(env_value RAG_CHUNK_OVERLAP_TOKENS)" ]] || set_env_value RAG_CHUNK_OVERLAP_TOKENS "120"
   [[ -n "$(env_value RAG_TOP_K)" ]] || set_env_value RAG_TOP_K "8"
   [[ -n "$(env_value RAG_AUTO_INDEX)" ]] || set_env_value RAG_AUTO_INDEX "1"
   [[ -n "$(env_value RAG_WATCH_INTERVAL_SECONDS)" ]] || set_env_value RAG_WATCH_INTERVAL_SECONDS "20"
   [[ -n "$(env_value RAG_WATCH_DEBOUNCE_SECONDS)" ]] || set_env_value RAG_WATCH_DEBOUNCE_SECONDS "3"
+  [[ -n "$(env_value RAG_SPREADSHEETS_ENABLED)" ]] || set_env_value RAG_SPREADSHEETS_ENABLED "1"
+  [[ -n "$(env_value RAG_SPREADSHEET_MAX_FILE_MB)" ]] || set_env_value RAG_SPREADSHEET_MAX_FILE_MB "50"
+  [[ -n "$(env_value RAG_SPREADSHEET_MAX_ROWS_PER_CHUNK)" ]] || set_env_value RAG_SPREADSHEET_MAX_ROWS_PER_CHUNK "50"
+  [[ -n "$(env_value RAG_SPREADSHEET_MAX_ROWS_FULL)" ]] || set_env_value RAG_SPREADSHEET_MAX_ROWS_FULL "5000"
+  [[ -n "$(env_value RAG_SPREADSHEET_INCLUDE_HIDDEN)" ]] || set_env_value RAG_SPREADSHEET_INCLUDE_HIDDEN "0"
+  [[ -n "$(env_value RAG_SPREADSHEET_INCLUDE_FORMULAS)" ]] || set_env_value RAG_SPREADSHEET_INCLUDE_FORMULAS "1"
+  [[ -n "$(env_value RAG_SPREADSHEET_INCLUDE_COMMENTS)" ]] || set_env_value RAG_SPREADSHEET_INCLUDE_COMMENTS "1"
+  [[ -n "$(env_value RAG_PDF_ENABLED)" ]] || set_env_value RAG_PDF_ENABLED "1"
+  [[ -n "$(env_value RAG_IMAGES_ENABLED)" ]] || set_env_value RAG_IMAGES_ENABLED "1"
+  [[ -n "$(env_value RAG_OCR_ENABLED)" ]] || set_env_value RAG_OCR_ENABLED "1"
+  [[ -n "$(env_value RAG_OCR_MODE)" ]] || set_env_value RAG_OCR_MODE "needed"
+  [[ -n "$(env_value RAG_OCR_LANGUAGES)" ]] || set_env_value RAG_OCR_LANGUAGES "rus+eng+deu"
+  [[ -n "$(env_value RAG_OCR_TESSDATA_PATH)" ]] || set_env_value RAG_OCR_TESSDATA_PATH ".runtime/tessdata"
+  [[ -n "$(env_value RAG_OCR_LANGUAGE_SOURCE)" ]] || set_env_value RAG_OCR_LANGUAGE_SOURCE "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main"
+  [[ -n "$(env_value RAG_OCR_MIN_TEXT_CHARS)" ]] || set_env_value RAG_OCR_MIN_TEXT_CHARS "200"
+  [[ -n "$(env_value RAG_OCR_MAX_PAGES)" ]] || set_env_value RAG_OCR_MAX_PAGES "25"
+  [[ -n "$(env_value RAG_OCR_DPI)" ]] || set_env_value RAG_OCR_DPI "200"
+  [[ -n "$(env_value INSTALL_RAG_OCR)" ]] || set_env_value INSTALL_RAG_OCR "1"
   [[ -n "$(env_value MATRIX_MODES)" ]] || set_env_value MATRIX_MODES "hermes/docker hermes/multipass openclaw/docker openclaw/multipass"
   [[ -n "$(env_value MATRIX_RAG_QUERY)" ]] || set_env_value MATRIX_RAG_QUERY "OpenClaw"
   [[ -n "$(env_value MATRIX_CHAT_TIMEOUT_SECONDS)" ]] || set_env_value MATRIX_CHAT_TIMEOUT_SECONDS "180"
@@ -448,7 +520,7 @@ Next:
   make models-search       # wraps: lms get --mlx
   make models-list         # wraps: lms ls --json
   make model-start-bg      # serves LM Studio model dir with oMLX
-  make rag-install         # optional local LanceDB RAG dependencies
+  make rag-install         # local LanceDB/PDF/OCR RAG dependencies
 
 Project env:
   ${ENV_FILE}

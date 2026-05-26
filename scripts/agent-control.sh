@@ -48,7 +48,7 @@ TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
 
 usage() {
   cat <<EOF
-Usage: $0 <start|stop|restart|pause|status|logs|shell|open-dashboard>
+Usage: $0 <start|stop|restart|pause|status|active|pause-mode|logs|shell|open-dashboard>
 EOF
 }
 
@@ -229,6 +229,11 @@ guard_single_active_agent() {
       done <<<"${conflicts}"
       return 0
       ;;
+    ignore|allow)
+      echo "WARNING: ignoring active agent conflict by request." >&2
+      printf '%s\n' "${conflicts}" | sed 's/^/  active: /' >&2
+      return 0
+      ;;
     clean|clean-all)
       FORCE=1 "${SCRIPT_DIR}/clean-all.sh"
       return 0
@@ -236,7 +241,7 @@ guard_single_active_agent() {
     fail)
       ;;
     *)
-      die "unsupported AGENT_CONFLICT_POLICY=${AGENT_CONFLICT_POLICY}. Use fail, prompt, or pause."
+      die "unsupported AGENT_CONFLICT_POLICY=${AGENT_CONFLICT_POLICY}. Use fail, prompt, pause, clean, or ignore."
       ;;
   esac
 
@@ -416,6 +421,16 @@ status_agent() {
   VM_NAME="${OPENCLAW_VM_NAME}" AGENT_RUNTIME=openclaw "${SCRIPT_DIR}/openclaw-control.sh" status multipass || true
 }
 
+active_agent() {
+  active_records
+}
+
+pause_mode_action() {
+  local mode="${2:-}"
+  [[ -n "${mode}" ]] || die "pause-mode requires an agent mode such as hermes/vm"
+  pause_mode "${mode}"
+}
+
 logs_agent() {
   case "${AGENT_RUNTIME}:${target}" in
     hermes:docker) docker logs --tail 200 "${DOCKER_NAME}" 2>&1 || true ;;
@@ -454,6 +469,8 @@ case "${ACTION}" in
   restart) stop_agent; start_agent ;;
   pause) pause_agent ;;
   status) status_agent ;;
+  active) active_agent ;;
+  pause-mode) pause_mode_action "$@" ;;
   logs) logs_agent ;;
   shell) shell_agent ;;
   open-dashboard) open_dashboard ;;

@@ -185,6 +185,7 @@ AGENT_RUNTIME=""
 BACKEND=""
 PREVIOUS_AGENT_RUNTIME=""
 PREVIOUS_SANDBOX_BACKEND=""
+SETUP_AGENT_CONFLICT_POLICY="prompt"
 
 choose_runtime() {
   step "Choose agent runtime"
@@ -247,6 +248,125 @@ choose_backend() {
     docker)
       env_put SANDBOX_BACKEND docker
       ok "Backend: Docker"
+      ;;
+  esac
+}
+
+runtime_target() {
+  case "${BACKEND}" in
+    docker) printf 'docker\n' ;;
+    multipass|vm) printf 'vm\n' ;;
+    *) printf '%s\n' "${BACKEND}" ;;
+  esac
+}
+
+agent_mode_label() {
+  local record="$1"
+  local mode runtime backend target_name
+  mode="${record%%|*}"
+  runtime="$(printf '%s\n' "${record}" | cut -d'|' -f2)"
+  backend="$(printf '%s\n' "${record}" | cut -d'|' -f3)"
+  target_name="$(printf '%s\n' "${record}" | cut -d'|' -f4)"
+  printf '%s (%s/%s: %s)\n' "${mode}" "${runtime}" "${backend}" "${target_name}"
+}
+
+pause_detected_mode() {
+  local mode="$1"
+  "${SCRIPT_DIR}/agent-control.sh" pause-mode "${mode}"
+}
+
+abort_setup() {
+  [[ -n "${PREVIOUS_AGENT_RUNTIME}" ]] && env_put AGENT_RUNTIME "${PREVIOUS_AGENT_RUNTIME}"
+  [[ -n "${PREVIOUS_SANDBOX_BACKEND}" ]] && env_put SANDBOX_BACKEND "${PREVIOUS_SANDBOX_BACKEND}"
+  die "$1"
+}
+
+preflight_active_agent() {
+  step "Active agent preflight"
+
+  local requested_mode="${AGENT_RUNTIME}/$(runtime_target)"
+  local -a active_records=()
+  local record
+  while IFS= read -r record; do
+    [[ -n "${record}" ]] || continue
+    active_records+=("${record}")
+  done < <("${SCRIPT_DIR}/agent-control.sh" active || true)
+
+  if [[ "${#active_records[@]}" -eq 0 ]]; then
+    ok "No active agent stack detected"
+    return
+  fi
+
+  printf "  ${DIM}Detected active agent stack(s):${RESET}\n"
+  local same_active=0
+  local other_active=0
+  local mode
+  for record in "${active_records[@]}"; do
+    mode="${record%%|*}"
+    printf "    ${CYAN}- %s${RESET}\n" "$(agent_mode_label "${record}")"
+    if [[ "${mode}" == "${requested_mode}" ]]; then
+      same_active=1
+    else
+      other_active=1
+    fi
+  done
+  printf "  ${DIM}Requested stack: ${requested_mode}${RESET}\n"
+
+  local idx
+  if [[ "${other_active}" -eq 0 && "${same_active}" -eq 1 ]]; then
+    idx="$(choose_menu "The requested stack is already running. What should setup do?" \
+      "Reuse it and continue setup" \
+      "Pause/restart it before continuing" \
+      "Full clean-all reset before continuing" \
+      "Abort setup")"
+    case "${idx}" in
+      0)
+        SETUP_AGENT_CONFLICT_POLICY="prompt"
+        ok "Will reuse active stack"
+        ;;
+      1)
+        pause_detected_mode "${requested_mode}"
+        SETUP_AGENT_CONFLICT_POLICY="prompt"
+        ok "Active stack paused"
+        ;;
+      2)
+        FORCE=1 "${SCRIPT_DIR}/clean-all.sh"
+        SETUP_AGENT_CONFLICT_POLICY="prompt"
+        ok "Sandbox reset complete"
+        ;;
+      3)
+        abort_setup "Setup aborted by user."
+        ;;
+    esac
+    return
+  fi
+
+  idx="$(choose_menu "Another stack is active. What should setup do?" \
+    "Pause active stack(s) and continue" \
+    "Full clean-all reset before continuing" \
+    "Continue anyway without stopping anything" \
+    "Abort setup")"
+  case "${idx}" in
+    0)
+      for record in "${active_records[@]}"; do
+        mode="${record%%|*}"
+        [[ "${mode}" == "${requested_mode}" ]] && continue
+        pause_detected_mode "${mode}"
+      done
+      SETUP_AGENT_CONFLICT_POLICY="prompt"
+      ok "Conflicting stack(s) paused"
+      ;;
+    1)
+      FORCE=1 "${SCRIPT_DIR}/clean-all.sh"
+      SETUP_AGENT_CONFLICT_POLICY="prompt"
+      ok "Sandbox reset complete"
+      ;;
+    2)
+      SETUP_AGENT_CONFLICT_POLICY="ignore"
+      warn "Continuing with another stack still active. Use this only for stale detection or advanced debugging."
+      ;;
+    3)
+      abort_setup "Setup aborted by user."
       ;;
   esac
 }
@@ -461,7 +581,7 @@ start_omlx() {
 # ── Step 8: Create sandbox ────────────────────────────────────────────────────
 create_sandbox() {
   step "Starting selected agent stack"
-  if ! AGENT_RUNTIME="${AGENT_RUNTIME}" SANDBOX_BACKEND="${BACKEND}" AGENT_CONFLICT_POLICY=prompt "${SCRIPT_DIR}/agent-control.sh" start; then
+  if ! AGENT_RUNTIME="${AGENT_RUNTIME}" SANDBOX_BACKEND="${BACKEND}" AGENT_CONFLICT_POLICY="${SETUP_AGENT_CONFLICT_POLICY}" "${SCRIPT_DIR}/agent-control.sh" start; then
     [[ -n "${PREVIOUS_AGENT_RUNTIME}" ]] && env_put AGENT_RUNTIME "${PREVIOUS_AGENT_RUNTIME}"
     [[ -n "${PREVIOUS_SANDBOX_BACKEND}" ]] && env_put SANDBOX_BACKEND "${PREVIOUS_SANDBOX_BACKEND}"
     die "Agent stack start failed; restored previous runtime/backend selection in .env."
@@ -679,6 +799,7 @@ main() {
   run_bootstrap_if_needed
   choose_runtime
   choose_backend
+  preflight_active_agent
   configure_credentials
   configure_model
   configure_rag

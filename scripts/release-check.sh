@@ -52,6 +52,13 @@ version_str="$(cat VERSION)"
 [[ -f LICENSE ]] || fail "LICENSE missing"
 [[ -f CHANGELOG.md ]] || fail "CHANGELOG.md missing"
 
+log "Checking tracked text for non-English Cyrillic content"
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  "${SCRIPT_DIR}/check-english-text.py"
+else
+  echo "warn no git metadata in this workspace; skipping Cyrillic scan"
+fi
+
 log "Scanning publishable files for local secrets/runtime state"
 legacy_default="$(printf 'b%s' 'ig7')"
 if grep -RFIn --exclude-dir=.runtime --exclude-dir=.vm --exclude-dir=.cache --exclude=.env --exclude='*.log' -- "${legacy_default}" .; then

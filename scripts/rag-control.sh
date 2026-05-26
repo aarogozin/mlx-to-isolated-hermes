@@ -44,6 +44,8 @@ RAG_BIND_HOST="${OVERRIDE_RAG_BIND_HOST:-${RAG_BIND_HOST:-0.0.0.0}}"
 RAG_PORT="${OVERRIDE_RAG_PORT:-${RAG_PORT:-8765}}"
 RAG_VENV_PATH="${RAG_VENV_PATH:-.runtime/rag-venv}"
 RAG_EMBEDDING_BACKEND="${RAG_EMBEDDING_BACKEND:-sentence-transformers}"
+RAG_OCR_TESSDATA_PATH="${RAG_OCR_TESSDATA_PATH:-.runtime/tessdata}"
+RAG_OCR_LANGUAGE_SOURCE="${RAG_OCR_LANGUAGE_SOURCE:-https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main}"
 
 case "${RAG_INDEX_PATH}" in
   /*) RAG_INDEX_ABS="${RAG_INDEX_PATH}" ;;
@@ -53,6 +55,11 @@ esac
 case "${RAG_VENV_PATH}" in
   /*) RAG_VENV_ABS="${RAG_VENV_PATH}" ;;
   *) RAG_VENV_ABS="${PROJECT_ROOT}/${RAG_VENV_PATH}" ;;
+esac
+
+case "${RAG_OCR_TESSDATA_PATH}" in
+  /*) RAG_OCR_TESSDATA_ABS="${RAG_OCR_TESSDATA_PATH}" ;;
+  *) RAG_OCR_TESSDATA_ABS="${PROJECT_ROOT}/${RAG_OCR_TESSDATA_PATH}" ;;
 esac
 
 PID_FILE="${RAG_INDEX_ABS}/rag-service.pid"
@@ -80,9 +87,57 @@ install_deps() {
   fi
   "${PYTHON_BIN}" -m pip install --upgrade pip wheel
   "${PYTHON_BIN}" -m pip install --upgrade lancedb fastapi uvicorn pydantic
+  "${PYTHON_BIN}" -m pip install --upgrade pymupdf pillow pytesseract
+  if [[ "${RAG_SPREADSHEETS_ENABLED:-1}" == "1" || "${RAG_SPREADSHEETS_ENABLED:-1}" == "true" ]]; then
+    "${PYTHON_BIN}" -m pip install --upgrade openpyxl python-calamine
+    if [[ "${INSTALL_RAG_DUCKDB:-0}" == "1" || "${INSTALL_RAG_DUCKDB:-0}" == "true" ]]; then
+      "${PYTHON_BIN}" -m pip install --upgrade duckdb
+    fi
+  fi
   if [[ "${RAG_EMBEDDING_BACKEND}" != "hash" ]]; then
     "${PYTHON_BIN}" -m pip install --upgrade sentence-transformers
   fi
+
+  local install_ocr="${INSTALL_RAG_OCR:-}"
+  if [[ -z "${install_ocr}" ]]; then
+    if [[ "${RAG_OCR_ENABLED:-1}" == "0" || "${RAG_OCR_ENABLED:-1}" == "false" ]]; then
+      install_ocr=0
+    else
+      install_ocr=1
+    fi
+  fi
+
+  if [[ "${install_ocr}" == "1" || "${install_ocr}" == "true" ]]; then
+    if command -v brew >/dev/null 2>&1; then
+      brew install tesseract
+    else
+      echo "WARN: Homebrew missing; install tesseract manually for OCR." >&2
+    fi
+    install_ocr_languages
+  else
+    echo "Skipping OCR system dependencies because INSTALL_RAG_OCR=0 or RAG_OCR_ENABLED=0."
+  fi
+}
+
+install_ocr_languages() {
+  mkdir -p "${RAG_OCR_TESSDATA_ABS}"
+
+  local langs="${RAG_OCR_LANGUAGES:-rus+eng+deu}"
+  local lang source file tmp
+  IFS='+' read -r -a lang_parts <<< "${langs}"
+  for lang in "${lang_parts[@]}"; do
+    [[ -n "${lang}" ]] || continue
+    file="${RAG_OCR_TESSDATA_ABS}/${lang}.traineddata"
+    if [[ -s "${file}" ]]; then
+      echo "ok OCR language: ${lang}"
+      continue
+    fi
+    source="${RAG_OCR_LANGUAGE_SOURCE%/}/${lang}.traineddata"
+    tmp="${file}.tmp"
+    echo "Installing OCR language: ${lang}"
+    curl -fL --retry 3 --connect-timeout 20 -o "${tmp}" "${source}"
+    mv "${tmp}" "${file}"
+  done
 }
 
 ensure_installed() {

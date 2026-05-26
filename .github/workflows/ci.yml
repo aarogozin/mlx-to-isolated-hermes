@@ -24,6 +24,9 @@ jobs:
           find scripts -name '*.sh' -print0 \
             | xargs -0 -I{} bash -n {}
 
+      - name: Check tracked text is English-only
+        run: scripts/check-english-text.py
+
       - name: Shared folder mock tests
         run: scripts/test-shared-mounts-mock.sh
 
@@ -31,6 +34,7 @@ jobs:
         run: |
           python3 -m py_compile scripts/models-doctor.py scripts/rag.py
           RAG_EMBEDDING_BACKEND=hash scripts/test-rag-unit.sh
+          RAG_EMBEDDING_BACKEND=hash scripts/test-rag-ocr-smoke.sh
 
       - name: Release check without host-only e2e
         run: |

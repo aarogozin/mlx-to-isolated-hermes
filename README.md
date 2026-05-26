@@ -20,7 +20,7 @@ make agent-open-dashboard
 
 If LM Studio was just installed, launch it once before rerunning `make bootstrap`; this initializes the `lms` CLI.
 
-`make setup` also asks whether to connect local RAG for this deployment. If selected, it installs RAG dependencies, indexes `OBSIDIAN_SHARED_PATH`, starts the host RAG service, and verifies `rag-search` from inside the chosen Hermes/OpenClaw sandbox.
+`make setup` also checks for already-running agent stacks before deploying. It can reuse the requested stack, pause/restart it, clean sandbox state, or pause a different active stack before switching. The wizard also asks whether to connect local RAG for this deployment. If selected, it installs RAG dependencies, indexes `OBSIDIAN_SHARED_PATH`, starts the host RAG service, and verifies `rag-search` from inside the chosen Hermes/OpenClaw sandbox.
 
 ## Architecture
 
@@ -97,6 +97,10 @@ Defaults:
 - service: `http://127.0.0.1:8765`
 - embeddings: `intfloat/multilingual-e5-small`
 - storage: LanceDB
+
+Spreadsheet files (`.xlsx`, `.xlsm`, `.xls`, `.xlsb`, `.ods`) are indexed with workbook-aware chunks: workbook summary, sheet summaries, row ranges, formulas, and comments. Search results include sheet/range metadata so the agent can point back to the relevant part of a workbook.
+
+PDF files are indexed through PyMuPDF. OCR is enabled by default as a capability, but it is a needed-only fallback for scanned PDFs and images; normal selectable-text PDFs do not invoke OCR. `make bootstrap`, `make setup`, and `make rag-install` install Tesseract support on macOS unless `INSTALL_RAG_OCR=0` is set. Requested OCR language data is stored under `.runtime/tessdata`.
 
 The sandbox gets a `rag-search` CLI bridge and `rag-host.internal` DNS alias. Hermes/OpenClaw can call `rag-search "query"` explicitly before answering questions about local notes, project knowledge, or Obsidian vault content. v0.4.0 does not inject RAG context automatically.
 
@@ -182,7 +186,7 @@ Supported combinations:
 - `AGENT_RUNTIME=openclaw SANDBOX_BACKEND=multipass`
 - `AGENT_RUNTIME=openclaw SANDBOX_BACKEND=docker`
 
-`make agent-start` refuses to start a different combination while another agent is running. `make setup` prompts to pause the active stack and continue. For non-interactive switching:
+`make agent-start` refuses to start a different combination while another agent is running. `make setup` shows the active stack before deploying and prompts to reuse, pause/restart, clean all sandbox state, continue anyway for advanced debugging, or abort. For non-interactive switching:
 
 ```bash
 AGENT_RUNTIME=openclaw SANDBOX_BACKEND=multipass make agent-switch
@@ -270,7 +274,7 @@ make release-check
 SKIP_VM_E2E=1 SKIP_DOCKER_E2E=1 make release-check
 ```
 
-Release check runs shell/Python syntax, mocked shared-folder tests, RAG unit tests, host doctor/model API checks, optional RAG smoke, VM e2e, real shared-folder smoke, Docker e2e, and daemon status checks.
+Release check runs shell/Python syntax, an English-only tracked-text scan, mocked shared-folder tests, RAG unit tests, host doctor/model API checks, optional RAG smoke, VM e2e, real shared-folder smoke, Docker e2e, and daemon status checks.
 
 ## Local Matrix E2E
 

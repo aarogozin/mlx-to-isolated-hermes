@@ -20,6 +20,8 @@
    make agent-open-dashboard
    ```
 
+   If another agent stack is already active, confirm that the wizard reports it and offers reuse, pause/restart, clean-all, continue-anyway, or abort as appropriate.
+
 6. If `OBSIDIAN_SHARED_PATH` is configured, verify the shared folder and RAG:
 
    ```bash
@@ -28,6 +30,13 @@
    make rag-index
    make rag-search QUERY="release smoke"
    make rag-status
+   ```
+
+   OCR smoke. `make rag-install` installs Tesseract on macOS by default when OCR is enabled and downloads requested language data into `.runtime/tessdata`; set `INSTALL_RAG_OCR=0` only for a lightweight local/CI run:
+
+   ```bash
+   make rag-install
+   RAG_OCR_ENABLED=1 scripts/test-rag-ocr-smoke.sh
    ```
 
 7. Scan local model stores before release:
@@ -79,6 +88,7 @@
    ```bash
    git status --short
    git ls-files .env .runtime .vm .cache
+   scripts/check-english-text.py
    ```
 
 12. Commit, tag, and push:
