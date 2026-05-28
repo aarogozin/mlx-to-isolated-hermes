@@ -608,26 +608,25 @@ verify_rag_after_deploy() {
   [[ "${RAG_SELECTED}" -eq 1 ]] || return 0
 
   step "Verifying RAG inside sandbox"
-  local query="${RAG_SMOKE_QUERY:-local knowledge}"
   local rag_port
   rag_port="$(env_get RAG_PORT)"; rag_port="${rag_port:-8765}"
-  local output=""
+  local health_output=""
+  local health_ok=0
+
   case "${BACKEND}" in
     docker)
       if [[ "${AGENT_RUNTIME}" == "openclaw" ]]; then
         local container
         container="$(env_get OPENCLAW_DOCKER_NAME)"; container="${container:-omlx-agent-openclaw-docker}"
-        output="$(docker exec \
-          -e "RAG_BASE_URL=http://rag-host.internal:${rag_port}" \
-          -e "RAG_QUERY=${query}" \
-          "${container}" sh -lc 'rag-search "$RAG_QUERY"' 2>&1 || true)"
+        health_output="$(docker exec \
+          "${container}" sh -lc \
+          "curl -fsS --max-time 5 http://rag-host.internal:${rag_port}/health" 2>&1 || true)"
       else
         local container
         container="$(env_get DOCKER_NAME)"; container="${container:-omlx-agent-docker}"
-        output="$(docker exec \
-          -e "RAG_BASE_URL=http://rag-host.internal:${rag_port}" \
-          -e "RAG_QUERY=${query}" \
-          "${container}" /bin/bash -lc 'export PATH=/opt/data/.local/bin:$PATH; set -a; . /opt/data/.env; set +a; RAG_BASE_URL="http://rag-host.internal:'"${rag_port}"'" rag-search "$RAG_QUERY"' 2>&1 || true)"
+        health_output="$(docker exec \
+          "${container}" /bin/bash -lc \
+          "curl -fsS --max-time 5 http://rag-host.internal:${rag_port}/health" 2>&1 || true)"
       fi
       ;;
     multipass)
@@ -639,19 +638,17 @@ verify_rag_after_deploy() {
         vm_name="$(env_get HERMES_VM_NAME)"; vm_name="${vm_name:-$(env_get VM_NAME)}"; vm_name="${vm_name:-omlx-agent-ubuntu}"
       fi
       vm_user="$(env_get VM_SSH_USER)"; vm_user="${vm_user:-agent}"
-      output="$(multipass exec "${vm_name}" -- sudo -Hu "${vm_user}" env \
-        "RAG_BASE_URL=http://rag-host.internal:${rag_port}" \
-        "RAG_QUERY=${query}" \
-        bash -lc 'export PATH="$HOME/.local/bin:$PATH"; rag-search "$RAG_QUERY"' 2>&1 || true)"
+      health_output="$(multipass exec "${vm_name}" -- \
+        curl -fsS --max-time 5 "http://rag-host.internal:${rag_port}/health" 2>&1 || true)"
       ;;
   esac
 
-  if printf '%s\n' "${output}" | grep -q '^RAG results for:'; then
-    printf '%s\n' "${output}" | sed -n '1,12p' | sed 's/^/     /'
-    ok "RAG is reachable from ${AGENT_RUNTIME}/${BACKEND}"
+  if printf '%s\n' "${health_output}" | grep -q '"ok":true'; then
+    ok "RAG is reachable from ${AGENT_RUNTIME}/${BACKEND} (indexing may still be in progress)"
+    info "Run 'make rag-logs' to follow indexing progress, 'make rag-search QUERY=...' when done."
   else
-    printf '%s\n' "${output}" | sed -n '1,80p' | sed 's/^/     /'
-    die "RAG host service works, but ${AGENT_RUNTIME}/${BACKEND} could not use rag-search."
+    printf '%s\n' "${health_output}" | sed -n '1,20p' | sed 's/^/     /'
+    die "RAG API is not reachable from ${AGENT_RUNTIME}/${BACKEND} sandbox at http://rag-host.internal:${rag_port}/health"
   fi
 }
 
@@ -784,6 +781,7 @@ DONE
   printf "  ${DIM}  make doctor               ${RESET}# full system health check\n"
   printf "  ${DIM}  make model-select         ${RESET}# switch local model\n"
   printf "  ${DIM}  make rag-search QUERY=\"...\" ${RESET}# query local RAG\n"
+  printf "  ${DIM}  make rag-index-status     ${RESET}# show indexing progress\n"
   printf "  ${DIM}  make rag-status           ${RESET}# RAG service status\n"
   if [[ "${BACKEND}" != "docker" ]]; then
     printf "  ${DIM}  make vm-ssh               ${RESET}# SSH into the agent VM\n"
@@ -795,8 +793,16 @@ DONE
   printf "\n"
 
   # ── Auto-open dashboard in browser ──
-  if command -v open >/dev/null 2>&1; then
+  if command -v open > /dev/null 2>&1; then
     open "${DASHBOARD_URL}"
+  fi
+
+  # ── RAG indexing status ──
+  if [[ "${RAG_SELECTED:-0}" -eq 1 ]]; then
+    printf "\n"
+    printf "  ${BOLD}RAG indexing status:${RESET}\n"
+    "${SCRIPT_DIR}/rag-control.sh" index-status 2>/dev/null | sed 's/^/  /' || true
+    printf "  ${DIM}  Run 'make rag-index-status' any time to refresh.${RESET}\n"
   fi
 }
 
