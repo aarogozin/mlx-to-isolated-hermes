@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 .PHONY: help bootstrap setup doctor clean-all release-check ci-check matrix-e2e \
 	models-search models-list models-sync models-doctor models-prune-incomplete model-select model-start-bg model-stop-bg model-check \
-	rag-install rag-preflight rag-index rag-sync rag-search rag-start rag-stop rag-status rag-doctor rag-up rag-down rag-logs \
+	rag-install rag-preflight rag-index rag-sync rag-search rag-start rag-stop rag-status rag-doctor rag-up rag-down rag-logs rag-index-status \
 	agent-start agent-stop agent-restart agent-pause agent-switch agent-status agent-logs agent-shell agent-open-dashboard \
 	vm-ssh vm-status shared-mounts-check
 
@@ -22,6 +22,7 @@ help:
 	@printf '  %-24s %s\n' 'make rag-preflight' 'Verify Docker RAG images before pulling'
 	@printf '  %-24s %s\n' 'make rag-sync' 'Index source and start RAG service'
 	@printf '  %-24s %s\n' 'make rag-search QUERY=...' 'Search local RAG'
+	@printf '  %-24s %s\n' 'make rag-index-status' 'Show indexing progress (files done, %)'
 	@printf '  %-24s %s\n' 'make rag-up' 'Start Dockerized RAG'
 	@printf '  %-24s %s\n' 'make rag-down' 'Stop Dockerized RAG'
 	@printf '\n%s\n' 'Agents:'
@@ -123,6 +124,9 @@ rag-down:
 
 rag-logs:
 	RAG_RUNTIME=docker ./scripts/rag-control.sh logs
+
+rag-index-status:
+	./scripts/rag-control.sh index-status
 
 agent-start:
 	./scripts/agent-control.sh start

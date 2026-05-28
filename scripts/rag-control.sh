@@ -548,6 +548,57 @@ status_service() {
   fi
 }
 
+
+index_status() {
+  local log_file
+  if [[ "${RAG_RUNTIME}" == "docker" ]]; then
+    log_file="${RAG_DOCKER_INDEX_ABS}/rag-index.log"
+  else
+    log_file="${RAG_INDEX_ABS}/rag-index.log"
+  fi
+
+  if [[ ! -f "${log_file}" ]]; then
+    echo "rag_index=not_started  (no log found at ${log_file})"
+    return 0
+  fi
+
+  # Extract latest progress counter [N/TOTAL]
+  local progress_line current=0 total=0
+  progress_line="$(grep -o '\[[0-9]*/[0-9]*\]' "${log_file}" | tail -1 || true)"
+  if [[ "${progress_line}" =~ \[([0-9]+)/([0-9]+)\] ]]; then
+    current="${BASH_REMATCH[1]}"
+    total="${BASH_REMATCH[2]}"
+  fi
+
+  # Last file that was being indexed
+  local last_file
+  last_file="$(grep -o '\[[0-9]*/[0-9]*\] Indexing [^:]*' "${log_file}" 2>/dev/null | sed 's/\[[0-9]*\/[0-9]*\] Indexing //' | tail -1 || true)"
+
+  # Detect if indexer process is still alive
+  local running=0
+  if pgrep -f "rag-control.sh index" > /dev/null 2>&1 || pgrep -f "rag-control index" > /dev/null 2>&1; then
+    running=1
+  fi
+
+  if [[ "${total}" -gt 0 ]]; then
+    local pct=$(( current * 100 / total ))
+    if [[ "${running}" -eq 1 ]]; then
+      printf "rag_index=running   %d/%d files (%d%%)\n" "${current}" "${total}" "${pct}"
+    elif [[ "${current}" -ge "${total}" ]]; then
+      printf "rag_index=complete  %d/%d files (100%%)\n" "${current}" "${total}"
+    else
+      printf "rag_index=stopped   %d/%d files (%d%%) — run 'make rag-index' to resume\n" "${current}" "${total}" "${pct}"
+    fi
+    [[ -n "${last_file}" ]] && printf "last_file=%s\n" "${last_file}"
+  else
+    if [[ "${running}" -eq 1 ]]; then
+      echo "rag_index=running  (scanning files...)"
+    else
+      echo "rag_index=unknown  (no progress found in log — run 'make rag-index' to start)"
+    fi
+  fi
+}
+
 ACTION="${1:-}"
 shift || true
 
@@ -703,9 +754,12 @@ case "${ACTION}" in
     [[ "${RAG_RUNTIME}" == "host" ]] || die "watch-logs is only available for RAG_RUNTIME=host."
     tail -n "${RAG_LOG_LINES:-120}" "${WATCH_LOG_FILE}" 2>/dev/null || true
     ;;
+  index-status)
+    index_status
+    ;;
   *)
     cat >&2 <<EOF
-Usage: $0 <install|preflight|index|sync|search|start|stop|restart|up|down|status|doctor|health|logs|watch|watch-start|watch-stop|watch-restart|watch-status|watch-logs>
+Usage: $0 <install|preflight|index|sync|search|start|stop|restart|up|down|status|doctor|health|logs|index-status|watch|watch-start|watch-stop|watch-restart|watch-status|watch-logs>
 EOF
     exit 2
     ;;

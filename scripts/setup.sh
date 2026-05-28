@@ -781,6 +781,7 @@ DONE
   printf "  ${DIM}  make doctor               ${RESET}# full system health check\n"
   printf "  ${DIM}  make model-select         ${RESET}# switch local model\n"
   printf "  ${DIM}  make rag-search QUERY=\"...\" ${RESET}# query local RAG\n"
+  printf "  ${DIM}  make rag-index-status     ${RESET}# show indexing progress\n"
   printf "  ${DIM}  make rag-status           ${RESET}# RAG service status\n"
   if [[ "${BACKEND}" != "docker" ]]; then
     printf "  ${DIM}  make vm-ssh               ${RESET}# SSH into the agent VM\n"
@@ -792,8 +793,16 @@ DONE
   printf "\n"
 
   # ── Auto-open dashboard in browser ──
-  if command -v open >/dev/null 2>&1; then
+  if command -v open > /dev/null 2>&1; then
     open "${DASHBOARD_URL}"
+  fi
+
+  # ── RAG indexing status ──
+  if [[ "${RAG_SELECTED:-0}" -eq 1 ]]; then
+    printf "\n"
+    printf "  ${BOLD}RAG indexing status:${RESET}\n"
+    "${SCRIPT_DIR}/rag-control.sh" index-status 2>/dev/null | sed 's/^/  /' || true
+    printf "  ${DIM}  Run 'make rag-index-status' any time to refresh.${RESET}\n"
   fi
 }
 
