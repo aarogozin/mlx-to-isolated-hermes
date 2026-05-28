@@ -8,6 +8,7 @@ ENV_FILE="${PROJECT_ROOT}/.env"
 OVERRIDE_TELEGRAM_BOT_TOKEN_SET="${TELEGRAM_BOT_TOKEN+x}"
 OVERRIDE_TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 OVERRIDE_DOCKER_NAME="${DOCKER_NAME:-}"
+OVERRIDE_AGENT_DATA_DIR="${AGENT_DATA_DIR:-}"
 OVERRIDE_DOCKER_DATA_VOLUME="${DOCKER_DATA_VOLUME:-}"
 OVERRIDE_DOCKER_WORKSPACE_VOLUME="${DOCKER_WORKSPACE_VOLUME:-}"
 
@@ -20,6 +21,7 @@ fi
 
 ACTION="${1:-}"
 DOCKER_NAME="${OVERRIDE_DOCKER_NAME:-${DOCKER_NAME:-omlx-agent-docker}}"
+AGENT_DATA_DIR="${OVERRIDE_AGENT_DATA_DIR:-${AGENT_DATA_DIR:-}}"
 DOCKER_DATA_VOLUME="${OVERRIDE_DOCKER_DATA_VOLUME:-${DOCKER_DATA_VOLUME:-${DOCKER_NAME}-data}}"
 DOCKER_WORKSPACE_VOLUME="${OVERRIDE_DOCKER_WORKSPACE_VOLUME:-${DOCKER_WORKSPACE_VOLUME:-${DOCKER_NAME}-workspace}}"
 if [[ -n "${OVERRIDE_TELEGRAM_BOT_TOKEN_SET}" ]]; then
@@ -30,7 +32,7 @@ fi
 
 usage() {
   cat <<EOF
-Usage: $0 <start|stop|shell|reset|destroy|status>
+Usage: $0 <start|stop|shell|update|reset|destroy|status|data-path>
 EOF
 }
 
@@ -130,6 +132,41 @@ case "${ACTION}" in
       docker ps -a --filter "name=^/${DOCKER_NAME}$"
     else
       echo "Docker sandbox does not exist: ${DOCKER_NAME}"
+    fi
+    ;;
+  update)
+    # Pull latest image, stop container, recreate keeping data volumes
+    echo "Pulling latest image for ${DOCKER_NAME}..."
+    local current_image
+    current_image="$(docker inspect -f '{{.Config.Image}}' "${DOCKER_NAME}" 2>/dev/null || true)"
+    if [[ -n "${current_image}" ]]; then
+      docker pull "${current_image}" || true
+    fi
+    if container_exists; then
+      docker stop "${DOCKER_NAME}" > /dev/null 2>&1 || true
+      docker rm "${DOCKER_NAME}" > /dev/null 2>&1 || true
+    fi
+    "${SCRIPT_DIR}/docker-create.sh"
+    docker start "${DOCKER_NAME}" > /dev/null
+    echo "Updated and restarted: ${DOCKER_NAME}"
+    ;;
+  data-path)
+    # Show where agent data lives
+    local data_path
+    if [[ -n "${AGENT_DATA_DIR}" ]]; then
+      data_path="${AGENT_DATA_DIR}"
+      case "${data_path}" in
+        /*) ;;
+        *) data_path="${SCRIPT_DIR}/../${data_path}" ;;
+      esac
+    else
+      data_path="${SCRIPT_DIR}/../.runtime/agent"
+    fi
+    data_path="$(cd "${data_path}" 2>/dev/null && pwd || echo "${data_path} (not created yet)")"
+    echo "agent_data_dir=${data_path}"
+    if [[ -d "${data_path}" ]]; then
+      echo "contents:"
+      ls -la "${data_path}" 2>/dev/null | sed 's/^/  /'
     fi
     ;;
   *)

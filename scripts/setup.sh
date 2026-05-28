@@ -732,6 +732,14 @@ DONE
   printf "  ${BOLD}Backend:${RESET}    %s\n"   "${BACKEND}"
   printf "  ${BOLD}Model:${RESET}      %s\n"   "${model}"
   printf "  ${BOLD}oMLX API:${RESET}   %s\n"   "${base_url}"
+  if [[ "${BACKEND}" == "docker" ]]; then
+    local agent_data_dir
+    agent_data_dir="$(env_get AGENT_DATA_DIR)"
+    if [[ -z "${agent_data_dir}" ]]; then
+      agent_data_dir="${SCRIPT_DIR}/../.runtime/agent"
+    fi
+    printf "  ${BOLD}Agent data:${RESET} %s\n" "${agent_data_dir}"
+  fi
   if [[ "${RAG_SELECTED}" -eq 1 ]]; then
     printf "  ${BOLD}RAG:${RESET}        %s\n"   "enabled at http://127.0.0.1:$(env_get RAG_PORT)"
   else

@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .PHONY: help bootstrap setup doctor clean-all release-check ci-check matrix-e2e \
 	models-search models-list models-sync models-doctor models-prune-incomplete model-select model-start-bg model-stop-bg model-check \
 	rag-install rag-preflight rag-index rag-sync rag-search rag-start rag-stop rag-status rag-doctor rag-up rag-down rag-logs rag-index-status \
-	agent-start agent-stop agent-restart agent-pause agent-switch agent-status agent-logs agent-shell agent-open-dashboard \
+	agent-start agent-stop agent-restart agent-pause agent-switch agent-status agent-logs agent-shell agent-open-dashboard agent-update agent-data \
 	vm-ssh vm-status shared-mounts-check
 
 help:
@@ -28,6 +28,8 @@ help:
 	@printf '\n%s\n' 'Agents:'
 	@printf '  %-24s %s\n' 'make agent-start' 'Start selected Hermes/OpenClaw stack'
 	@printf '  %-24s %s\n' 'make agent-status' 'Show active agent state'
+	@printf '  %-24s %s\n' 'make agent-update' 'Pull latest image and restart agent'
+	@printf '  %-24s %s\n' 'make agent-data' 'Show agent data directory on host'
 	@printf '  %-24s %s\n' 'make agent-open-dashboard' 'Open Dashboard/Control UI'
 	@printf '  %-24s %s\n' 'make agent-shell' 'Shell into selected sandbox'
 	@printf '\n%s\n' 'Release:'
@@ -154,6 +156,12 @@ agent-shell:
 
 agent-open-dashboard:
 	./scripts/agent-control.sh open-dashboard
+
+agent-update:
+	./scripts/docker-control.sh update
+
+agent-data:
+	./scripts/docker-control.sh data-path
 
 vm-ssh:
 	./scripts/vm-control.sh ssh

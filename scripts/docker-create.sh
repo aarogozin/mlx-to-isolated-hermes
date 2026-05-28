@@ -7,6 +7,7 @@ ENV_FILE="${PROJECT_ROOT}/.env"
 
 OVERRIDE_HERMES_IMAGE="${HERMES_IMAGE:-}"
 OVERRIDE_DOCKER_NAME="${DOCKER_NAME:-}"
+OVERRIDE_AGENT_DATA_DIR="${AGENT_DATA_DIR:-}"
 OVERRIDE_DOCKER_DATA_VOLUME="${DOCKER_DATA_VOLUME:-}"
 OVERRIDE_DOCKER_WORKSPACE_VOLUME="${DOCKER_WORKSPACE_VOLUME:-}"
 OVERRIDE_DOCKER_DASHBOARD_PORT="${DOCKER_DASHBOARD_PORT:-}"
@@ -28,6 +29,7 @@ fi
 DOCKER_NAME="${OVERRIDE_DOCKER_NAME:-${DOCKER_NAME:-omlx-agent-docker}}"
 HERMES_IMAGE="${OVERRIDE_HERMES_IMAGE:-${HERMES_IMAGE:-nousresearch/hermes-agent:latest}}"
 DOCKER_IMAGE="${HERMES_IMAGE}"
+AGENT_DATA_DIR="${OVERRIDE_AGENT_DATA_DIR:-${AGENT_DATA_DIR:-}}"
 DOCKER_DATA_VOLUME="${OVERRIDE_DOCKER_DATA_VOLUME:-${DOCKER_DATA_VOLUME:-${DOCKER_NAME}-data}}"
 DOCKER_WORKSPACE_VOLUME="${OVERRIDE_DOCKER_WORKSPACE_VOLUME:-${DOCKER_WORKSPACE_VOLUME:-${DOCKER_NAME}-workspace}}"
 DOCKER_CPUS="${DOCKER_CPUS:-2}"
@@ -81,11 +83,39 @@ normalize_path() {
   printf '%s\n' "${path}"
 }
 
-command -v docker >/dev/null 2>&1 || die "docker CLI missing. Run make bootstrap or install Docker Desktop."
+# Resolve agent data directory:
+# 1. AGENT_DATA_DIR if set (absolute or relative to PROJECT_ROOT)
+# 2. Falls back to .runtime/agent inside the project
+agent_data_dir_abs() {
+  local dir="${AGENT_DATA_DIR:-}"
+  if [[ -z "${dir}" ]]; then
+    dir="${PROJECT_ROOT}/.runtime/agent"
+  else
+    dir="$(normalize_path "${dir}")"
+    case "${dir}" in
+      /*) ;;
+      *) dir="${PROJECT_ROOT}/${dir}" ;;
+    esac
+  fi
+  printf '%s\n' "${dir}"
+}
+
+# Auto-detect Docker platform (arm64 on Apple Silicon, amd64 otherwise)
+docker_platform() {
+  local arch
+  arch="$(uname -m)"
+  case "${arch}" in
+    arm64|aarch64) echo "linux/arm64" ;;
+    *) echo "linux/amd64" ;;
+  esac
+}
+DOCKER_PLATFORM="$(docker_platform)"
+
+command -v docker > /dev/null 2>&1 || die "docker CLI missing. Run make bootstrap or install Docker Desktop."
 [[ -n "${OPENAI_API_KEY}" ]] || die "OPENAI_API_KEY missing. Run make bootstrap or set it in .env."
 
-if ! docker image inspect "${DOCKER_IMAGE}" >/dev/null 2>&1; then
-  docker pull --platform linux/arm64 "${DOCKER_IMAGE}"
+if ! docker image inspect "${DOCKER_IMAGE}" > /dev/null 2>&1; then
+  docker pull --platform "${DOCKER_PLATFORM}" "${DOCKER_IMAGE}"
 fi
 
 served_models_json="$(curl -fsS --max-time 3 -H "Authorization: Bearer ${OPENAI_API_KEY}" "${OPENAI_BASE_URL:-http://localhost:8000/v1}/models" 2>/dev/null || true)"
@@ -99,8 +129,28 @@ elif [[ -z "${MODEL_NAME}" ]]; then
   MODEL_NAME="local-model"
 fi
 
-docker volume create "${DOCKER_DATA_VOLUME}" >/dev/null
-docker volume create "${DOCKER_WORKSPACE_VOLUME}" >/dev/null
+# Resolve data directory (bind-mount path or named volumes)
+DATA_DIR_ABS="$(agent_data_dir_abs)"
+USE_BIND_MOUNT=1
+
+# If AGENT_DATA_DIR is unset AND user explicitly has volume vars set,
+# they may prefer the old named-volume mode. But bind-mount is the new default.
+if [[ -z "${AGENT_DATA_DIR:-}" && "${DOCKER_BIND_MOUNT:-1}" == "0" ]]; then
+  USE_BIND_MOUNT=0
+fi
+
+if [[ "${USE_BIND_MOUNT}" -eq 1 ]]; then
+  mkdir -p "${DATA_DIR_ABS}" "${DATA_DIR_ABS}/workspace"
+  data_mount="${DATA_DIR_ABS}:/opt/data"
+  workspace_mount="${DATA_DIR_ABS}/workspace:/opt/data/workspace"
+  echo "Agent data directory (host): ${DATA_DIR_ABS}"
+else
+  docker volume create "${DOCKER_DATA_VOLUME}" > /dev/null
+  docker volume create "${DOCKER_WORKSPACE_VOLUME}" > /dev/null
+  data_mount="${DOCKER_DATA_VOLUME}:/opt/data"
+  workspace_mount="${DOCKER_WORKSPACE_VOLUME}:/opt/data/workspace"
+  echo "Agent data volume: ${DOCKER_DATA_VOLUME}"
+fi
 
 write_data_volume() {
   docker run --rm \
@@ -118,8 +168,8 @@ write_data_volume() {
     -e GATEWAY_ALLOW_ALL_USERS="${GATEWAY_ALLOW_ALL_USERS}" \
     -e RAG_BASE_URL="${RAG_BASE_URL_DOCKER}" \
     -v "${SCRIPT_DIR}/rag-search-bridge.sh:/tmp/rag-search:ro" \
-    -v "${DOCKER_DATA_VOLUME}:/opt/data" \
-    -v "${DOCKER_WORKSPACE_VOLUME}:/opt/data/workspace" \
+    -v "${data_mount}" \
+    -v "${workspace_mount}" \
     "${DOCKER_IMAGE}" \
     /bin/bash -lc 'set -euo pipefail
 mkdir -p /opt/data/logs /opt/data/workspace /opt/data/.local/bin
@@ -175,8 +225,8 @@ chmod 600 /opt/data/.env /opt/data/config.yaml'
 write_data_volume
 
 mount_args=(
-  -v "${DOCKER_DATA_VOLUME}:/opt/data"
-  -v "${DOCKER_WORKSPACE_VOLUME}:/opt/data/workspace"
+  -v "${data_mount}"
+  -v "${workspace_mount}"
 )
 
 if [[ -n "${OBSIDIAN_SHARED_PATH}" ]]; then
@@ -212,9 +262,9 @@ if docker container inspect "${DOCKER_NAME}" >/dev/null 2>&1; then
   docker rm "${DOCKER_NAME}" >/dev/null
 fi
 
-docker create \
+  docker create \
   --name "${DOCKER_NAME}" \
-  --platform linux/arm64 \
+  --platform "${DOCKER_PLATFORM}" \
   --restart unless-stopped \
   --cpus "${DOCKER_CPUS}" \
   --memory "${DOCKER_MEMORY}" \
@@ -239,3 +289,6 @@ echo "Model API: ${OPENAI_BASE_URL_DOCKER}"
 echo "Model: ${MODEL_NAME}"
 echo "Dashboard: http://127.0.0.1:${DOCKER_DASHBOARD_PORT}"
 echo "Gateway API: http://127.0.0.1:${DOCKER_GATEWAY_API_PORT}"
+if [[ "${USE_BIND_MOUNT}" -eq 1 ]]; then
+  echo "Agent data (host): ${DATA_DIR_ABS}"
+fi
