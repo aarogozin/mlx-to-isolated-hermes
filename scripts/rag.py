@@ -1355,7 +1355,7 @@ def serve() -> None:
     # module globals rather than this function's local imports.
     globals()["Request"] = Request
 
-    app = FastAPI(title="oMLX Agent Local RAG", version="0.4.0")
+    app = FastAPI(title="oMLX Agent Local RAG", version="0.5.1")
 
     @app.get("/health")
     def health_route() -> dict[str, Any]:

@@ -1,6 +1,6 @@
 # Local RAG
 
-v0.4.0 provides a Docker-first local RAG layer for Obsidian vaults and personal documents.
+The oMLX Isolated Agent Stack provides a Docker-first local RAG layer for Obsidian vaults and personal documents.
 
 Your shared folder is the source of truth. Everything under `.runtime/` is derived state and can be rebuilt.
 

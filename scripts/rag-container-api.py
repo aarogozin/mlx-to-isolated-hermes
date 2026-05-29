@@ -455,7 +455,7 @@ def format_markdown(result: dict[str, Any]) -> str:
 def serve() -> None:
     import uvicorn
 
-    app = FastAPI(title="Docker RAG API", version="0.4.0")
+    app = FastAPI(title="Docker RAG API", version="0.5.1")
 
     @app.get("/health")
     def health_route() -> dict[str, Any]:
