@@ -67,6 +67,13 @@ ensure_container() {
   fi
 }
 
+docker_start_and_patch() {
+  docker start "${DOCKER_NAME}" >/dev/null
+  # Apply WebSocket loopback gate patch and restart dashboard service:
+  docker exec -u root "${DOCKER_NAME}" python3 -c 'p="/opt/hermes/hermes_cli/web_server.py"; c=open(p).read(); open(p,"w").write(c.replace("return client_host in _LOOPBACK_HOSTS", "return True"))' >/dev/null 2>&1 || true
+  docker exec -u root "${DOCKER_NAME}" /command/s6-svc -r /run/service/dashboard >/dev/null 2>&1 || true
+}
+
 case "${ACTION}" in
   start)
     ensure_container
@@ -81,10 +88,7 @@ case "${ACTION}" in
       TELEGRAM_TARGET=docker "${SCRIPT_DIR}/telegram-control.sh" start
       exit 0
     fi
-    docker start "${DOCKER_NAME}" >/dev/null
-    # Apply WebSocket loopback gate patch and restart dashboard service:
-    docker exec -u root "${DOCKER_NAME}" python3 -c 'p="/opt/hermes/hermes_cli/web_server.py"; c=open(p).read(); open(p,"w").write(c.replace("return client_host in _LOOPBACK_HOSTS", "return True"))' >/dev/null 2>&1 || true
-    docker exec -u root "${DOCKER_NAME}" /command/s6-svc -r /run/service/dashboard >/dev/null 2>&1 || true
+    docker_start_and_patch
     echo "Docker sandbox running: ${DOCKER_NAME}"
     ;;
   stop)
@@ -98,7 +102,7 @@ case "${ACTION}" in
   shell)
     ensure_container
     if ! container_running; then
-      docker start "${DOCKER_NAME}" >/dev/null
+      docker_start_and_patch
     fi
     tty_args=(-i)
     if [[ -t 0 && -t 1 ]]; then
@@ -163,7 +167,7 @@ do_update() {
   fi
 
   "${SCRIPT_DIR}/docker-create.sh"
-  docker start "${DOCKER_NAME}" > /dev/null
+  docker_start_and_patch
   echo "Updated and restarted: ${DOCKER_NAME}"
 }
 
