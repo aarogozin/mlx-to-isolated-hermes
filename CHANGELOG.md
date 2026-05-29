@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+
+## 0.5.0 — 2026-05-29
+
+Docker-first agent setup with host-visible persistent data and separated knowledge sources.
+
+- Make Docker the default and only wizard-presented backend. Multipass VM
+  remains functional but must be selected manually via `SANDBOX_BACKEND=multipass`.
+- Add `AGENT_DATA_DIR` bind-mount: agent config, skills, and workspace are now
+  visible on the host at `.runtime/agent/` by default. Set an absolute path to
+  keep data outside the project directory.
+- Simplify `make setup` wizard to two questions: agent choice (Hermes/OpenClaw)
+  and RAG (yes/no). Backend, API key, and base URLs are set automatically.
+- Separate `RAG_SOURCE_PATH` (documents library, RAG-only, read-only mount) from
+  `OBSIDIAN_SHARED_PATH` (agent workspace, read-write mount at `/mnt/obsidian`).
+  The agent no longer gets direct access to the documents folder.
+- Add `make agent-update` — pull latest image and restart without losing data.
+- Add `make agent-data` — show agent data directory on the host.
+- Add `make rag-index-status` — show RAG indexing progress.
+- Fix RAG connectivity check to verify `/health` endpoint instead of requiring
+  search results (indexing is async and takes time on first run).
+- Auto-detect Docker platform (arm64/amd64) instead of hardcoding `linux/arm64`.
+- Restructure `.env.example` with a **START HERE** block for host paths and API
+  keys, followed by sections for each subsystem. VM variables moved to the bottom
+  as legacy/deprecated.
+- Rewrite README: Docker-first architecture, persistent data table, knowledge
+  sources documentation, clean two-question quickstart.
+
 ## 0.4.0 — 2026-05-25
 
 Docker-first local RAG preview for Obsidian-backed agent knowledge and personal documents.

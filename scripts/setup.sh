@@ -445,14 +445,14 @@ configure_model() {
   choice="$(choose_menu "Select the model for ${AGENT_RUNTIME}:" "${model_labels[@]}")"
   SELECTED_MODEL="${model_ids[$choice]}"
 
-  MODEL="${SELECTED_MODEL}" "${SCRIPT_DIR}/models-sync-omlx.sh" >/dev/null 2>&1 || true
+  MODEL="${SELECTED_MODEL}" "${SCRIPT_DIR}/models-sync-omlx.sh" > /dev/null 2>&1 || true
   ok "Model: ${SELECTED_MODEL}"
 }
 
 # ── Step 6: Optional local RAG ────────────────────────────────────────────────
 configure_rag() {
   step "Local RAG"
-  printf "  ${DIM}RAG indexes your notes/documents folder and makes it searchable by the agent.${RESET}\n"
+  printf "  ${DIM}RAG indexes your documents folder and makes it searchable by the agent.${RESET}\n"
   printf "  ${DIM}It runs fully locally in Docker and can be rebuilt from source at any time.${RESET}\n"
 
   local idx
@@ -474,29 +474,58 @@ configure_rag() {
 
   [[ "${HAVE_DOCKER}" -eq 1 ]] || die "Docker Desktop is required for RAG. Start Docker Desktop first."
 
-  # ── Source path ──
-  local source_path
-  source_path="$(env_get RAG_SOURCE_PATH)"
-  if [[ -z "${source_path}" || "${source_path}" == '${OBSIDIAN_SHARED_PATH}' || "${source_path}" == '${OBSIDIAN_SHARED_PATH:-}' ]]; then
-    source_path="$(env_get OBSIDIAN_SHARED_PATH)"
+  # ── RAG source path (documents library — RAG-only, read-only mount) ──
+  local rag_source_path
+  rag_source_path="$(env_get RAG_SOURCE_PATH)"
+  # Clear the placeholder expression if still unresolved
+  if [[ "${rag_source_path}" == '${OBSIDIAN_SHARED_PATH}' || "${rag_source_path}" == '${OBSIDIAN_SHARED_PATH:-}' ]]; then
+    rag_source_path=""
+  fi
+  # Fall back to OBSIDIAN_SHARED_PATH if RAG_SOURCE_PATH was not set independently
+  if [[ -z "${rag_source_path}" ]]; then
+    rag_source_path="$(env_get OBSIDIAN_SHARED_PATH)"
   fi
 
-  if [[ -z "${source_path}" ]]; then
-    printf "  ${DIM}Enter the path to your Obsidian vault or documents folder.${RESET}\n"
-    source_path="$(prompt "Documents folder path")"
+  if [[ -z "${rag_source_path}" ]]; then
+    printf "\n  ${BOLD}Documents folder for RAG${RESET}\n"
+    printf "  ${DIM}This folder will be indexed and made searchable via rag-search.\n"
+    printf "  Mounted read-only into the RAG container. PDFs, Word, spreadsheets,\n"
+    printf "  Markdown and plain text are all supported.${RESET}\n"
+    rag_source_path="$(prompt "Documents / vault path")"
   fi
 
-  [[ -n "${source_path}" ]] || die "RAG was selected but no source path was provided."
-  source_path="${source_path/#\~/${HOME}}"
-  [[ -d "${source_path}" ]] || die "Path does not exist: ${source_path}"
+  [[ -n "${rag_source_path}" ]] || die "RAG was selected but no source path was provided."
+  rag_source_path="${rag_source_path/#\~/${HOME}}"
+  [[ -d "${rag_source_path}" ]] || die "Path does not exist: ${rag_source_path}"
+  env_put RAG_SOURCE_PATH "${rag_source_path}"
+  ok "RAG source: ${rag_source_path}"
 
-  env_put OBSIDIAN_SHARED_PATH "${source_path}"
-  env_put RAG_SOURCE_PATH      "${source_path}"
+  # ── Obsidian workspace (agent read-write mount) ──
+  local obsidian_path
+  obsidian_path="$(env_get OBSIDIAN_SHARED_PATH)"
+
+  if [[ -z "${obsidian_path}" ]]; then
+    printf "\n  ${BOLD}Agent workspace (Obsidian vault)${RESET}\n"
+    printf "  ${DIM}This folder is mounted read-write inside the agent container at /mnt/obsidian.\n"
+    printf "  The agent can read and create notes here directly.\n"
+    printf "  Press Enter to use the same folder as the documents source.${RESET}\n"
+    obsidian_path="$(prompt "Obsidian vault path (Enter = same as documents)" "")"
+  fi
+
+  if [[ -z "${obsidian_path}" ]]; then
+    obsidian_path="${rag_source_path}"
+    info "Agent workspace: same as RAG source (${obsidian_path})"
+  else
+    obsidian_path="${obsidian_path/#\~/${HOME}}"
+    [[ -d "${obsidian_path}" ]] || die "Obsidian path does not exist: ${obsidian_path}"
+    ok "Agent workspace: ${obsidian_path}"
+  fi
+  env_put OBSIDIAN_SHARED_PATH "${obsidian_path}"
 
   local rag_port
   rag_port="$(env_get RAG_PORT)"; rag_port="${rag_port:-8765}"
-  env_put RAG_PORT       "${rag_port}"
-  env_put RAG_BASE_URL   "http://127.0.0.1:${rag_port}"
+  env_put RAG_PORT            "${rag_port}"
+  env_put RAG_BASE_URL        "http://127.0.0.1:${rag_port}"
   env_put RAG_BASE_URL_GUEST  "http://rag-host.internal:${rag_port}"
   env_put RAG_BASE_URL_DOCKER "http://rag-host.internal:${rag_port}"
   env_put RAG_AUTO_INDEX "1"
@@ -506,37 +535,28 @@ configure_rag() {
   substep "Installing RAG dependencies..."
   "${SCRIPT_DIR}/rag-control.sh" install
 
-  if [[ "${rag_runtime}" == "docker" ]]; then
-    substep "Starting Dockerized RAG service..."
-  else
-    substep "Starting host RAG service and auto-index watcher..."
-  fi
+  substep "Starting RAG containers (Qdrant, Tika, Docling, API)..."
   "${SCRIPT_DIR}/rag-control.sh" start
 
-  substep "Indexing local knowledge source (starting in background)..."
-  local log_file=".runtime/rag/rag-index.log"
-  if [[ "${rag_runtime}" == "docker" ]]; then
-    log_file=".runtime/rag-docker/rag-index.log"
-  fi
+  substep "Starting background indexing..."
+  local log_file=".runtime/rag-docker/rag-index.log"
   mkdir -p "$(dirname "${log_file}")"
   nohup "${SCRIPT_DIR}/rag-control.sh" index > "${log_file}" 2>&1 &
-  info "Indexing is running asynchronously. Check progress: tail -f ${log_file} or make rag-logs"
+  info "Indexing in background — check progress: make rag-index-status"
 
-  substep "Verifying RAG search API..."
-  local attempts=5
-  local i
-  local api_online=0
+  substep "Verifying RAG API is reachable..."
+  local attempts=5 i api_online=0
   for ((i=1; i<=attempts; i++)); do
-    if "${SCRIPT_DIR}/rag-control.sh" search "${RAG_SMOKE_QUERY}" >/dev/null 2>&1; then
+    if curl -fsS --max-time 2 "http://127.0.0.1:${rag_port}/health" > /dev/null 2>&1; then
       api_online=1
       break
     fi
     sleep 1
   done
   if [[ "${api_online}" -eq 1 ]]; then
-    ok "RAG search API is online"
+    ok "RAG API online at http://127.0.0.1:${rag_port}"
   else
-    warn "RAG search API did not respond within ${attempts}s, but indexing is running in background."
+    warn "RAG API not yet responding — containers may still be starting. Check: make rag-status"
   fi
 }
 
