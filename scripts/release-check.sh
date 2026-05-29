@@ -51,6 +51,9 @@ version_str="$(cat VERSION)"
   || fail "VERSION does not contain a valid semver string (got: '${version_str}')"
 [[ -f LICENSE ]] || fail "LICENSE missing"
 [[ -f CHANGELOG.md ]] || fail "CHANGELOG.md missing"
+if ! grep -q "^## ${version_str}" CHANGELOG.md; then
+  fail "Version '${version_str}' from VERSION file is not documented in CHANGELOG.md (expected '## ${version_str}')"
+fi
 
 log "Checking tracked text for non-English Cyrillic content"
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then

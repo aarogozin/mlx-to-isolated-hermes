@@ -32,7 +32,7 @@ jobs:
 
       - name: Python syntax and RAG unit tests
         run: |
-          python3 -m py_compile scripts/models-doctor.py scripts/rag.py
+          python3 -m py_compile scripts/models-doctor.py scripts/rag.py scripts/rag-container-api.py scripts/check-english-text.py
           RAG_EMBEDDING_BACKEND=hash scripts/test-rag-unit.sh
           RAG_EMBEDDING_BACKEND=hash scripts/test-rag-ocr-smoke.sh
 
@@ -64,6 +64,11 @@ jobs:
 
       - name: Docker daemon
         run: docker version
+
+      - name: Validate Docker Compose files
+        run: |
+          RAG_SOURCE_MOUNT=/tmp docker compose -f docker-compose.rag.yml config >/dev/null
+          CLOUDFLARE_TUNNEL_TOKEN=dummy-token docker compose -f docker-compose.cloudflared.yml config >/dev/null
 
       - name: Docker shared folder smoke
         run: scripts/test-docker-shared-mount.sh
