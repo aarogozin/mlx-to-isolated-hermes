@@ -1,8 +1,8 @@
 SHELL := /bin/bash
 
 .PHONY: help bootstrap setup doctor clean-all release-check ci-check matrix-e2e \
-	models-search models-list models-sync models-doctor models-prune-incomplete model-select model-start-bg model-stop-bg model-check \
-	rag-install rag-preflight rag-index rag-sync rag-search rag-start rag-stop rag-status rag-doctor rag-up rag-down rag-logs rag-index-status \
+	models-search models-list models-sync models-doctor models-prune-incomplete model-select model-start-bg model-stop-bg model-check omlx-update \
+	rag-install rag-preflight rag-index rag-sync rag-search rag-start rag-stop rag-status rag-doctor rag-up rag-down rag-logs rag-index-status rag-update \
 	agent-start agent-stop agent-restart agent-pause agent-switch agent-status agent-logs agent-shell agent-open-dashboard agent-update agent-data \
 	vm-ssh vm-status shared-mounts-check
 
@@ -18,6 +18,7 @@ help:
 	@printf '  %-24s %s\n' 'make models-list' 'List local LM Studio models'
 	@printf '  %-24s %s\n' 'make model-select' 'Select the model served by oMLX'
 	@printf '  %-24s %s\n' 'make model-start-bg' 'Start host oMLX service'
+	@printf '  %-24s %s\n' 'make omlx-update' 'Upgrade oMLX and restart its launchd service'
 	@printf '\n%s\n' 'RAG:'
 	@printf '  %-24s %s\n' 'make rag-preflight' 'Verify Docker RAG images before pulling'
 	@printf '  %-24s %s\n' 'make rag-sync' 'Index source and start RAG service'
@@ -25,6 +26,7 @@ help:
 	@printf '  %-24s %s\n' 'make rag-index-status' 'Show indexing progress (files done, %)'
 	@printf '  %-24s %s\n' 'make rag-up' 'Start Dockerized RAG'
 	@printf '  %-24s %s\n' 'make rag-down' 'Stop Dockerized RAG'
+	@printf '  %-24s %s\n' 'make rag-update' 'Pull latest Docker RAG images and restart stack'
 	@printf '\n%s\n' 'Agents:'
 	@printf '  %-24s %s\n' 'make agent-start' 'Start selected Hermes/OpenClaw stack'
 	@printf '  %-24s %s\n' 'make agent-status' 'Show active agent state'
@@ -90,6 +92,9 @@ model-stop-bg:
 model-check:
 	./scripts/doctor.sh --model-required
 
+omlx-update:
+	./scripts/omlx-update.sh
+
 rag-install:
 	./scripts/rag-control.sh install
 
@@ -129,6 +134,13 @@ rag-logs:
 
 rag-index-status:
 	./scripts/rag-control.sh index-status
+
+rag-update:
+	RAG_DOCKER_PULL_POLICY=always ./scripts/rag-control.sh install
+	@if docker container inspect mlx-isolated-rag >/dev/null 2>&1 && [ "$$(docker inspect -f '{{.State.Running}}' mlx-isolated-rag 2>/dev/null)" = "true" ]; then \
+		echo "Recreating and restarting running RAG stack..."; \
+		./scripts/rag-control.sh start; \
+	fi
 
 agent-start:
 	./scripts/agent-control.sh start
