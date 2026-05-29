@@ -138,8 +138,6 @@ compose_env_args() {
     "RAG_SOURCE_MOUNT=${source_mount}" \
     "RAG_INDEX_MOUNT=${RAG_DOCKER_INDEX_ABS}" \
     "RAG_TESSDATA_MOUNT=${RAG_OCR_TESSDATA_ABS}" \
-    "RAG_CACHE_MOUNT=${PROJECT_ROOT}/.runtime/rag-cache" \
-    "RAG_API_VENV_MOUNT=${PROJECT_ROOT}/.runtime/rag-api-venv" \
     "RAG_DOCKER_NAME=${RAG_DOCKER_NAME}" \
     "RAG_API_IMAGE=${RAG_API_IMAGE}" \
     "RAG_DOCKER_EMBEDDING_BACKEND=${RAG_DOCKER_EMBEDDING_BACKEND}" \
@@ -147,7 +145,6 @@ compose_env_args() {
     "RAG_TEI_IMAGE=${RAG_TEI_IMAGE}" \
     "RAG_TIKA_IMAGE=${RAG_TIKA_IMAGE}" \
     "RAG_DOCLING_IMAGE=${RAG_DOCLING_IMAGE}" \
-    "RAG_QDRANT_MOUNT=${PROJECT_ROOT}/.runtime/qdrant" \
     "RAG_PORT=${RAG_PORT}" \
     "RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}" \
     "RAG_EMBEDDING_BACKEND=${RAG_EMBEDDING_BACKEND}" \

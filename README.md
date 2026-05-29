@@ -1,164 +1,206 @@
 # MLX Isolated Agent Stack
 
-Run local MLX models on an Apple Silicon Mac and connect them to an isolated agent sandbox.
+Run local MLX models on an Apple Silicon Mac and connect them to an isolated
+agent running in Docker — no cloud, no subscription, fully private.
 
-The host keeps the expensive pieces local: LM Studio downloads models, oMLX serves them through an OpenAI-compatible API, and an optional local RAG service indexes your notes and documents. The agent runs separately in Docker or Multipass.
+The host keeps the heavy lifting local: LM Studio downloads models, oMLX
+serves them through an OpenAI-compatible API, and an optional RAG service
+indexes your documents. The agent runs in Docker with its data visible on the
+host filesystem.
 
-## What You Get
+**Version:** `0.5.0`
 
-- Local model serving with LM Studio + oMLX.
-- Hermes or OpenClaw running in Docker or a Multipass Ubuntu VM.
-- One active agent stack at a time, with safe switching prompts.
-- Optional local RAG over an Obsidian vault or documents folder.
-- PDF, image, spreadsheet, and text indexing with needed-only OCR.
-- Telegram and local web dashboard/control UI support.
-
-Version: `0.4.0`
+---
 
 ## Quickstart
 
 ```bash
-make bootstrap
-make setup
+make bootstrap        # install Homebrew, oMLX, Docker check
+make setup            # interactive wizard — 2 questions
 make agent-status
 make agent-open-dashboard
 ```
 
-If LM Studio was just installed, launch it once before rerunning `make bootstrap`; that initializes the `lms` CLI.
+`make setup` asks exactly two things:
 
-`make setup` is the main entrypoint. It asks for:
+1. **Which agent?** Hermes (conversational, Telegram + web dashboard) or
+   OpenClaw (browser-use, control UI)
+2. **Enable RAG?** Index a local documents folder for semantic search
 
-- agent runtime: Hermes or OpenClaw;
-- sandbox backend: Docker or Multipass;
-- local model from LM Studio;
-- optional Telegram credentials;
-- optional RAG source folder and RAG runtime.
+Everything else — Docker backend, API key, base URLs — is set automatically.
 
-Run `make help` for the public command list.
+---
 
-## Architecture
+## How It Works
 
-```text
+```
 macOS host
-  LM Studio       model download/catalog
-  oMLX            OpenAI-compatible model API on :8000
-  RAG service     Docker Compose API + Qdrant on :8765
+├── LM Studio         model download + catalog
+├── oMLX              OpenAI-compatible API  → :8000
+└── RAG service       Qdrant + parsers       → :8765  (optional)
 
-Sandbox
-  Hermes/OpenClaw in Docker or Multipass
-  model API       http://model-host.internal:8000/v1
-  RAG API         http://rag-host.internal:8765
+Docker containers
+├── Hermes / OpenClaw agent
+│   ├── model API   http://model-host.internal:8000/v1
+│   └── RAG API     http://rag-host.internal:8765
+└── RAG stack (docker-compose.rag.yml)
+    ├── qdrant        vector storage
+    ├── tika          document parsing
+    ├── docling       advanced PDF/image conversion
+    └── rag-api       FastAPI search endpoint
 ```
 
-Inference stays on the Mac. The sandbox is where the agent can install packages, work with shared files, and run tools.
+Inference stays on the Mac. The agent container is where tools run, files
+are written, and packages can be installed.
 
-## Supported Agent Modes
+---
+
+## Persistent Data
+
+| What | Where | Variable |
+|---|---|---|
+| Agent config, skills, workspace | Host: `.runtime/agent/` (default) | `AGENT_DATA_DIR` |
+| Agent Obsidian workspace | Host: your folder → `/mnt/obsidian` (rw) | `OBSIDIAN_SHARED_PATH` |
+| Documents for RAG indexing | Host: your folder → `/source` (ro, RAG only) | `RAG_SOURCE_PATH` |
+| RAG vector index (Qdrant) | **Docker volume** `mlx-isolated-rag_rag-qdrant` | — |
+| RAG Python venv | Docker volume `mlx-isolated-rag_rag-api-venv` | — |
+
+Agent data is bind-mounted so files are visible on the host. RAG index and
+Python dependencies live in Docker named volumes — they survive `make rag-down`
+and are not polluting your project directory.
+
+Set `AGENT_DATA_DIR` to a path outside the project (e.g. `~/.local/share/omlx-agent`)
+to keep agent data across `git clean`.
 
 ```bash
-AGENT_RUNTIME=hermes   SANDBOX_BACKEND=multipass make agent-start
-AGENT_RUNTIME=hermes   SANDBOX_BACKEND=docker    make agent-start
-AGENT_RUNTIME=openclaw SANDBOX_BACKEND=multipass make agent-start
-AGENT_RUNTIME=openclaw SANDBOX_BACKEND=docker    make agent-start
+make agent-data      # show current host path for agent data
+make agent-update    # pull latest Hermes or OpenClaw image, restart, keep all data
 ```
 
-Only one stack should be active at a time. `make setup` detects existing stacks and offers to reuse, pause, reset, or abort. For non-interactive switching:
+---
+
+## Knowledge Sources
+
+The agent has two distinct ways to access your content:
+
+### `OBSIDIAN_SHARED_PATH` — active workspace
+
+Mounted **read-write** at `/mnt/obsidian` inside the agent container.
+The agent can read notes, create new files, and follow links here using its
+file tools directly.
+
+### `RAG_SOURCE_PATH` — passive document library
+
+Mounted **read-only** into the **RAG container only** — the agent container
+does **not** get a mount to this folder.
+PDFs, Word files, spreadsheets, scanned images, and notes are indexed into
+Qdrant and made searchable through the `rag-search` tool.
+
+This separation means the agent always retrieves knowledge through semantic
+search rather than browsing raw files, which prevents confusion when the
+documents library is large or contains binary files.
+
+Both variables can point to the **same folder** (wizard default) or to
+separate directories. Separate paths are recommended when your documents
+library is large or distinct from your active notes.
 
 ```bash
-AGENT_RUNTIME=openclaw SANDBOX_BACKEND=multipass make agent-switch
+# .env — the two lines that matter
+OBSIDIAN_SHARED_PATH=/Users/you/vault       # agent reads/writes here
+RAG_SOURCE_PATH=/Users/you/documents        # RAG indexes here, agent cannot browse
 ```
+
+```bash
+make rag-index-status   # indexing progress
+make rag-search QUERY="what did we decide about X?"
+make rag-status
+# Wipe index and reindex from scratch:
+# docker volume rm mlx-isolated-rag_rag-qdrant && make rag-up && make rag-index
+```
+
+---
 
 ## Models
 
-Use LM Studio to discover and download MLX models, then sync the selected model into oMLX:
-
 ```bash
-make models-search
-make models-list
-make model-select
-make model-start-bg
-```
-
-Model cleanup helpers can scan LM Studio, oMLX runtime links, and Ollama storage for incomplete downloads:
-
-```bash
-make models-doctor
+make models-search          # search LM Studio catalog
+make models-list            # list downloaded models
+make model-select           # pick active model interactively
+make model-start-bg         # start oMLX in background
+make models-doctor          # scan for incomplete downloads
 make models-prune-incomplete
 ```
 
-## Local RAG
+---
 
-RAG is local-first and Docker-first. Your source folder remains the source of truth; `.runtime/` holds rebuildable Docker volumes and indexes.
-
-```bash
-make rag-preflight
-make rag-sync
-make rag-search QUERY="what did we decide about OpenClaw?"
-make rag-status
-```
-
-Indexed by default:
-
-- Markdown, plain text, JSON/YAML/TOML/XML/HTML, CSV/TSV;
-- Office documents, Excel/ODS, PDFs, and images through containerized Docling/Tika;
-- scanned PDFs and images through needed-only OCR in parser containers.
+## Agent Commands
 
 ```bash
-RAG_RUNTIME=docker make rag-preflight
-RAG_RUNTIME=docker make rag-up
-RAG_RUNTIME=docker make rag-sync
-RAG_RUNTIME=docker make rag-search QUERY="release notes"
-RAG_RUNTIME=docker make rag-down
+make agent-start            # start the configured agent stack
+make agent-stop
+make agent-restart
+make agent-status           # show running containers + ports
+make agent-shell            # open a shell inside the agent container
+make agent-open-dashboard   # open the web dashboard / control UI
+make agent-update           # pull latest image, restart, keep data
+make agent-data             # show host data directory
 ```
 
-Docker RAG uses prebuilt containers for parsing/OCR and vector storage, with lightweight local hash embeddings by default. The host does not install Tesseract, PyMuPDF, LanceDB, sentence-transformers, or Office parsers by default.
-
-See [docs/RAG.md](docs/RAG.md).
-
-## Shared Folder
-
-Set `OBSIDIAN_SHARED_PATH` to the folder you want the agent and RAG to see. Docker uses a bind mount. Multipass uses a live mount by default.
-
-```bash
-make shared-mounts-check
-```
+---
 
 ## Telegram and Dashboard
 
-Add Telegram credentials to `.env`:
+Add to `.env` before running `make setup`, or enter interactively in the wizard:
 
 ```bash
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_USER_ID=123456789
+TELEGRAM_BOT_TOKEN=...       # from @BotFather
+TELEGRAM_USER_ID=123456789   # from @userinfobot
 ```
 
-Then start the selected stack:
+The Hermes web dashboard is available at `http://127.0.0.1:9120` by default
+as soon as the container starts — no SSH tunnel needed.
 
-```bash
-make agent-start
-make agent-open-dashboard
-```
+Remote access via Cloudflare Tunnel is opt-in. See [docs/REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md).
 
-Remote dashboard access is opt-in through Cloudflare Tunnel. See [docs/REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md).
+---
 
-## Safety Notes
+## Configuration
 
-- `.env` is ignored by git and should hold all local secrets.
-- Model files and RAG indexes stay local.
+All settings live in `.env`. The file is created from `.env.example` on first
+run. The top section — **START HERE** — lists every variable you might want to
+change. Everything else has sensible defaults.
+
+Key variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `AGENT_DATA_DIR` | `.runtime/agent` | Agent data on host |
+| `OBSIDIAN_SHARED_PATH` | _(empty)_ | Notes folder for agent |
+| `RAG_SOURCE_PATH` | _(same as above)_ | Documents folder for RAG |
+| `MODEL_DIR` | `~/.lmstudio/models` | LM Studio model storage |
+| `DOCKER_DASHBOARD_PORT` | `9120` | Dashboard port on host |
+| `HERMES_IMAGE` | `nousresearch/hermes-agent:latest` | Agent image |
+
+---
+
+## Safety
+
+- `.env` is git-ignored and holds all local secrets.
+- Model files and RAG indexes stay local — nothing is uploaded.
 - oMLX uses Bearer auth for local API access.
-- Docker and Multipass sandbox agent execution, but they are not a substitute for reviewing secrets and mounted folders.
-- `FORCE=1 make clean-all` removes sandbox runtime state but preserves `.env`, model downloads, and source documents.
+- The Docker agent container is isolated; it cannot reach host services
+  unless explicitly exposed through `host.docker.internal`.
+- `FORCE=1 make clean-all` removes runtime state but preserves `.env`,
+  model downloads, and source documents.
 
-## Release Checks
+---
+
+## Release and CI
 
 ```bash
-make ci-check
+make ci-check                              # shell syntax + unit tests
 SKIP_VM_E2E=1 SKIP_DOCKER_E2E=1 make release-check
-```
-
-For a full local sandbox matrix:
-
-```bash
-make matrix-e2e
+make matrix-e2e                            # full sandbox matrix (optional)
 ```
 
 Provider roadmap: [docs/PROVIDERS.md](docs/PROVIDERS.md).

@@ -133,23 +133,24 @@ OMLX_RUNNING=0
 detect_state() {
   step "Detecting installed tools"
 
-  command -v brew >/dev/null 2>&1 \
+  command -v brew > /dev/null 2>&1 \
     && { HAVE_BREW=1;    ok  "Homebrew"; } \
     || warn "Homebrew not found"
 
-  { [[ -x "${HOME}/.lmstudio/bin/lms" ]] || command -v lms >/dev/null 2>&1; } \
+  { [[ -x "${HOME}/.lmstudio/bin/lms" ]] || command -v lms > /dev/null 2>&1; } \
     && { HAVE_LMS=1;    ok  "LM Studio CLI (lms)"; } \
     || warn "LM Studio CLI not found"
 
-  command -v omlx >/dev/null 2>&1 \
+  command -v omlx > /dev/null 2>&1 \
     && { HAVE_OMLX=1;   ok  "oMLX"; } \
     || warn "oMLX not found"
 
-  command -v multipass >/dev/null 2>&1 \
-    && { HAVE_MULTIPASS=1; ok "Multipass"; } || true
-
-  { command -v docker >/dev/null 2>&1 && docker version >/dev/null 2>&1; } \
-    && { HAVE_DOCKER=1; ok  "Docker Desktop"; } || true
+  if { command -v docker > /dev/null 2>&1 && docker version > /dev/null 2>&1; }; then
+    HAVE_DOCKER=1
+    ok "Docker Desktop"
+  else
+    warn "Docker Desktop not running — start it before continuing"
+  fi
 
   [[ -f "${ENV_FILE}" ]] && ok ".env present" || warn ".env not found (will create)"
 
@@ -161,7 +162,7 @@ detect_state() {
   if [[ -n "${api_key}" ]] && \
      curl -fsS --max-time 2 \
        -H "Authorization: Bearer ${api_key}" \
-       "${base_url}/models" >/dev/null 2>&1; then
+       "${base_url}/models" > /dev/null 2>&1; then
     OMLX_RUNNING=1
     ok "oMLX API already reachable at ${base_url}"
   else
@@ -180,84 +181,55 @@ run_bootstrap_if_needed() {
   HAVE_BREW=1; HAVE_OMLX=1
 }
 
-# ── Step 3: Choose runtime and backend ────────────────────────────────────────
+# ── Step 3: Choose agent runtime ─────────────────────────────────────────────
 AGENT_RUNTIME=""
-BACKEND=""
+BACKEND="docker"          # Docker is the only supported backend
 PREVIOUS_AGENT_RUNTIME=""
 PREVIOUS_SANDBOX_BACKEND=""
 SETUP_AGENT_CONFLICT_POLICY="prompt"
 
 choose_runtime() {
-  step "Choose agent runtime"
-  printf "  ${DIM}Hermes and OpenClaw can run in Docker or Multipass. Only one stack may run at a time.${RESET}\n"
+  # Skip if AGENT_RUNTIME is already set and the user is re-running setup
+  local current
+  current="$(env_get AGENT_RUNTIME)"
+  if [[ -n "${current}" && "${current}" != "hermes" && "${current}" != "openclaw" ]]; then
+    current=""
+  fi
+
+  step "Choose agent"
+  printf "  ${DIM}Both agents run in Docker. Only one stack may be active at a time.${RESET}\n"
+
+  local -a options=()
+  options+=("Hermes       — conversational agent, Telegram / web dashboard")
+  options+=("OpenClaw     — browser-use agent, control UI")
 
   local idx
-  idx="$(choose_menu "Which agent runtime do you want?" \
-    "Hermes      — supported" \
-    "OpenClaw    — supported")"
+  idx="$(choose_menu "Which agent do you want to run?" "${options[@]}")"
 
   ensure_env_file
+  # Always lock in Docker as the backend
+  env_put SANDBOX_BACKEND "docker"
+  env_put TELEGRAM_TARGET "docker"
+  env_put DASHBOARD_TARGET "docker"
+  BACKEND="docker"
+
   case "${idx}" in
     0)
       AGENT_RUNTIME="hermes"
       env_put AGENT_RUNTIME "hermes"
-      ok "Agent runtime: Hermes"
+      ok "Agent: Hermes (Docker)"
       ;;
     1)
       AGENT_RUNTIME="openclaw"
       env_put AGENT_RUNTIME "openclaw"
-      ok "Agent runtime: OpenClaw"
-      ;;
-  esac
-}
-
-choose_backend() {
-  step "Choose sandbox backend"
-  printf "  ${DIM}This controls where the selected agent runs.\n"
-  printf "  Inference (LLM) always stays on your Mac via oMLX.${RESET}\n"
-
-  local -a options=()
-  local -a keys=()
-
-  # Multipass is always offered; install if missing.
-  if [[ "${HAVE_MULTIPASS}" -eq 1 ]]; then
-    options+=("Multipass VM     — Ubuntu 24.04 ARM64  (recommended)")
-  else
-    options+=("Multipass VM     — Ubuntu 24.04 ARM64  ✦ will be installed")
-  fi
-  keys+=("multipass")
-
-  if [[ "${HAVE_DOCKER}" -eq 1 ]]; then
-    options+=("Docker           — official agent image, daemon-friendly")
-  else
-    options+=("Docker           — official agent image  ✦ Docker Desktop not running")
-  fi
-  keys+=("docker")
-
-  local idx
-  idx="$(choose_menu "Which sandbox backend do you want?" "${options[@]}")"
-  BACKEND="${keys[$idx]}"
-
-  ensure_env_file
-
-  case "${BACKEND}" in
-    multipass)
-      env_put SANDBOX_BACKEND multipass
-      ok "Backend: Multipass VM"
-      ;;
-    docker)
-      env_put SANDBOX_BACKEND docker
-      ok "Backend: Docker"
+      ok "Agent: OpenClaw (Docker)"
       ;;
   esac
 }
 
 runtime_target() {
-  case "${BACKEND}" in
-    docker) printf 'docker\n' ;;
-    multipass|vm) printf 'vm\n' ;;
-    *) printf '%s\n' "${BACKEND}" ;;
-  esac
+  # Always Docker
+  printf 'docker\n'
 }
 
 agent_mode_label() {
@@ -473,111 +445,118 @@ configure_model() {
   choice="$(choose_menu "Select the model for ${AGENT_RUNTIME}:" "${model_labels[@]}")"
   SELECTED_MODEL="${model_ids[$choice]}"
 
-  MODEL="${SELECTED_MODEL}" "${SCRIPT_DIR}/models-sync-omlx.sh" >/dev/null 2>&1 || true
+  MODEL="${SELECTED_MODEL}" "${SCRIPT_DIR}/models-sync-omlx.sh" > /dev/null 2>&1 || true
   ok "Model: ${SELECTED_MODEL}"
 }
 
 # ── Step 6: Optional local RAG ────────────────────────────────────────────────
 configure_rag() {
   step "Local RAG"
-  printf "  ${DIM}RAG indexes your Obsidian/documents folder and exposes it to ${AGENT_RUNTIME} through rag-search.${RESET}\n"
-  printf "  ${DIM}It is optional, local-only, and can be rebuilt from source notes at any time.${RESET}\n"
+  printf "  ${DIM}RAG indexes your documents folder and makes it searchable by the agent.${RESET}\n"
+  printf "  ${DIM}It runs fully locally in Docker and can be rebuilt from source at any time.${RESET}\n"
 
   local idx
-  idx="$(choose_menu "Do you want to connect and verify RAG for this deployment?" \
-    "Yes — install/index/start RAG and verify it after agent deploy" \
-    "Skip for now — keep RAG disabled for this setup")"
+  idx="$(choose_menu "Enable local RAG for this deployment?" \
+    "Yes — index my documents and connect RAG to the agent" \
+    "No  — skip RAG for now (can be enabled later with make rag-up)")"
 
   if [[ "${idx}" -ne 0 ]]; then
     RAG_SELECTED=0
     env_put RAG_ENABLED "0"
-    info "RAG skipped for this setup"
+    info "RAG skipped — run 'make rag-up && make rag-index' to enable later"
     return
   fi
 
   RAG_SELECTED=1
   env_put RAG_ENABLED "1"
+  env_put RAG_RUNTIME "docker"
+  ok "RAG runtime: Docker"
 
-  local rag_runtime install_rag_host
-  rag_runtime="$(env_get RAG_RUNTIME)"
-  rag_runtime="${rag_runtime:-docker}"
-  install_rag_host="$(env_get INSTALL_RAG_HOST)"
-  install_rag_host="${install_rag_host:-0}"
-  if [[ "${rag_runtime}" != "host" || "${install_rag_host}" != "1" ]]; then
-    rag_runtime="docker"
-  fi
-  if [[ "${rag_runtime}" == "docker" && "${HAVE_DOCKER}" -ne 1 ]]; then
-    die "Docker Desktop is required for Docker-first RAG. Start Docker Desktop or set RAG_RUNTIME=host and INSTALL_RAG_HOST=1 for the legacy host path."
-  fi
-  env_put RAG_RUNTIME "${rag_runtime}"
-  ok "RAG runtime: ${rag_runtime}"
+  [[ "${HAVE_DOCKER}" -eq 1 ]] || die "Docker Desktop is required for RAG. Start Docker Desktop first."
 
-  local source_path
-  source_path="$(env_get RAG_SOURCE_PATH)"
-  if [[ -z "${source_path}" || "${source_path}" == '${OBSIDIAN_SHARED_PATH}' || "${source_path}" == '${OBSIDIAN_SHARED_PATH:-}' ]]; then
-    source_path="$(env_get OBSIDIAN_SHARED_PATH)"
+  # ── RAG source path (documents library — RAG-only, read-only mount) ──
+  local rag_source_path
+  rag_source_path="$(env_get RAG_SOURCE_PATH)"
+  # Clear the placeholder expression if still unresolved
+  if [[ "${rag_source_path}" == '${OBSIDIAN_SHARED_PATH}' || "${rag_source_path}" == '${OBSIDIAN_SHARED_PATH:-}' ]]; then
+    rag_source_path=""
+  fi
+  # Fall back to OBSIDIAN_SHARED_PATH if RAG_SOURCE_PATH was not set independently
+  if [[ -z "${rag_source_path}" ]]; then
+    rag_source_path="$(env_get OBSIDIAN_SHARED_PATH)"
   fi
 
-  if [[ -z "${source_path}" ]]; then
-    printf "  ${DIM}Point this at your Obsidian vault or another local notes/documents folder.${RESET}\n"
-    source_path="$(prompt "RAG source path")"
+  if [[ -z "${rag_source_path}" ]]; then
+    printf "\n  ${BOLD}Documents folder for RAG${RESET}\n"
+    printf "  ${DIM}This folder will be indexed and made searchable via rag-search.\n"
+    printf "  Mounted read-only into the RAG container. PDFs, Word, spreadsheets,\n"
+    printf "  Markdown and plain text are all supported.${RESET}\n"
+    rag_source_path="$(prompt "Documents / vault path")"
   fi
 
-  [[ -n "${source_path}" ]] || die "RAG was selected but no source path was provided."
-  source_path="${source_path/#\~/${HOME}}"
-  [[ -d "${source_path}" ]] || die "RAG source path does not exist: ${source_path}"
+  [[ -n "${rag_source_path}" ]] || die "RAG was selected but no source path was provided."
+  rag_source_path="${rag_source_path/#\~/${HOME}}"
+  [[ -d "${rag_source_path}" ]] || die "Path does not exist: ${rag_source_path}"
+  env_put RAG_SOURCE_PATH "${rag_source_path}"
+  ok "RAG source: ${rag_source_path}"
 
-  env_put OBSIDIAN_SHARED_PATH "${source_path}"
-  env_put RAG_SOURCE_PATH "${source_path}"
+  # ── Obsidian workspace (agent read-write mount) ──
+  local obsidian_path
+  obsidian_path="$(env_get OBSIDIAN_SHARED_PATH)"
+
+  if [[ -z "${obsidian_path}" ]]; then
+    printf "\n  ${BOLD}Agent workspace (Obsidian vault)${RESET}\n"
+    printf "  ${DIM}This folder is mounted read-write inside the agent container at /mnt/obsidian.\n"
+    printf "  The agent can read and create notes here directly.\n"
+    printf "  Press Enter to use the same folder as the documents source.${RESET}\n"
+    obsidian_path="$(prompt "Obsidian vault path (Enter = same as documents)" "")"
+  fi
+
+  if [[ -z "${obsidian_path}" ]]; then
+    obsidian_path="${rag_source_path}"
+    info "Agent workspace: same as RAG source (${obsidian_path})"
+  else
+    obsidian_path="${obsidian_path/#\~/${HOME}}"
+    [[ -d "${obsidian_path}" ]] || die "Obsidian path does not exist: ${obsidian_path}"
+    ok "Agent workspace: ${obsidian_path}"
+  fi
+  env_put OBSIDIAN_SHARED_PATH "${obsidian_path}"
+
   local rag_port
   rag_port="$(env_get RAG_PORT)"; rag_port="${rag_port:-8765}"
-  env_put RAG_PORT "${rag_port}"
-  env_put RAG_BASE_URL "http://127.0.0.1:${rag_port}"
-  env_put RAG_BASE_URL_GUEST "http://rag-host.internal:${rag_port}"
+  env_put RAG_PORT            "${rag_port}"
+  env_put RAG_BASE_URL        "http://127.0.0.1:${rag_port}"
+  env_put RAG_BASE_URL_GUEST  "http://rag-host.internal:${rag_port}"
   env_put RAG_BASE_URL_DOCKER "http://rag-host.internal:${rag_port}"
   env_put RAG_AUTO_INDEX "1"
   [[ -n "$(env_get RAG_WATCH_INTERVAL_SECONDS)" ]] || env_put RAG_WATCH_INTERVAL_SECONDS "20"
   [[ -n "$(env_get RAG_WATCH_DEBOUNCE_SECONDS)" ]] || env_put RAG_WATCH_DEBOUNCE_SECONDS "3"
-  env_put MULTIPASS_SHARED_MODE "mount"
-
-  RAG_SMOKE_QUERY="$(env_get RAG_SMOKE_QUERY)"
-  RAG_SMOKE_QUERY="${RAG_SMOKE_QUERY:-${SELECTED_MODEL:-local knowledge}}"
-  info "RAG smoke-test query: ${RAG_SMOKE_QUERY}"
 
   substep "Installing RAG dependencies..."
   "${SCRIPT_DIR}/rag-control.sh" install
 
-  if [[ "${rag_runtime}" == "docker" ]]; then
-    substep "Starting Dockerized RAG service..."
-  else
-    substep "Starting host RAG service and auto-index watcher..."
-  fi
+  substep "Starting RAG containers (Qdrant, Tika, Docling, API)..."
   "${SCRIPT_DIR}/rag-control.sh" start
 
-  substep "Indexing local knowledge source (starting in background)..."
-  local log_file=".runtime/rag/rag-index.log"
-  if [[ "${rag_runtime}" == "docker" ]]; then
-    log_file=".runtime/rag-docker/rag-index.log"
-  fi
+  substep "Starting background indexing..."
+  local log_file=".runtime/rag-docker/rag-index.log"
   mkdir -p "$(dirname "${log_file}")"
   nohup "${SCRIPT_DIR}/rag-control.sh" index > "${log_file}" 2>&1 &
-  info "Indexing is running asynchronously. Check progress: tail -f ${log_file} or make rag-logs"
+  info "Indexing in background — check progress: make rag-index-status"
 
-  substep "Verifying RAG search API..."
-  local attempts=5
-  local i
-  local api_online=0
+  substep "Verifying RAG API is reachable..."
+  local attempts=5 i api_online=0
   for ((i=1; i<=attempts; i++)); do
-    if "${SCRIPT_DIR}/rag-control.sh" search "${RAG_SMOKE_QUERY}" >/dev/null 2>&1; then
+    if curl -fsS --max-time 2 "http://127.0.0.1:${rag_port}/health" > /dev/null 2>&1; then
       api_online=1
       break
     fi
     sleep 1
   done
   if [[ "${api_online}" -eq 1 ]]; then
-    ok "RAG search API is online"
+    ok "RAG API online at http://127.0.0.1:${rag_port}"
   else
-    warn "RAG search API did not respond within ${attempts}s, but indexing is running in background."
+    warn "RAG API not yet responding — containers may still be starting. Check: make rag-status"
   fi
 }
 
@@ -732,6 +711,14 @@ DONE
   printf "  ${BOLD}Backend:${RESET}    %s\n"   "${BACKEND}"
   printf "  ${BOLD}Model:${RESET}      %s\n"   "${model}"
   printf "  ${BOLD}oMLX API:${RESET}   %s\n"   "${base_url}"
+  if [[ "${BACKEND}" == "docker" ]]; then
+    local agent_data_dir
+    agent_data_dir="$(env_get AGENT_DATA_DIR)"
+    if [[ -z "${agent_data_dir}" ]]; then
+      agent_data_dir="${SCRIPT_DIR}/../.runtime/agent"
+    fi
+    printf "  ${BOLD}Agent data:${RESET} %s\n" "${agent_data_dir}"
+  fi
   if [[ "${RAG_SELECTED}" -eq 1 ]]; then
     printf "  ${BOLD}RAG:${RESET}        %s\n"   "enabled at http://127.0.0.1:$(env_get RAG_PORT)"
   else
@@ -818,19 +805,18 @@ main() {
   PREVIOUS_SANDBOX_BACKEND="$(env_get SANDBOX_BACKEND)"
   detect_state
   run_bootstrap_if_needed
-  choose_runtime
-  choose_backend
-  preflight_active_agent
-  configure_credentials
-  configure_model
-  configure_rag
-  start_omlx
-  create_sandbox
-  verify_rag_after_deploy
-  start_dashboard
-  start_telegram
-  verify_telegram
-  print_summary
+  choose_runtime          # Step 3: Hermes or OpenClaw — always Docker
+  preflight_active_agent  # Step 4: conflict detection
+  configure_credentials   # Step 5: API key + Telegram
+  configure_model         # Step 6: model selection
+  configure_rag           # Step 7: RAG yes/no + source path
+  start_omlx              # Step 8: start model server
+  create_sandbox          # Step 9: start agent container
+  verify_rag_after_deploy # Step 10: check RAG reachability from container
+  start_dashboard         # Step 11: SSH tunnel / container port
+  start_telegram          # Step 12: Telegram gateway
+  verify_telegram         # Step 13: test Telegram bot token
+  print_summary           # Step 14: final summary
 }
 
 main "$@"

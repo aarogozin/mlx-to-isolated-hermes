@@ -329,11 +329,13 @@ def build_chunks(path: Path) -> list[Chunk]:
 
 
 def index_documents() -> dict[str, Any]:
-    points: list[models.PointStruct] = []
     errors: list[dict[str, str]] = []
     files = scan_files()
     total = len(files)
     print(f"Starting indexing for {total} files.", flush=True)
+    chunks_written = 0
+    collection_initialized = False
+
     for idx, path in enumerate(files, 1):
         rel = path.relative_to(source_path()).as_posix()
         print(f"[{idx}/{total}] Indexing {rel}...", flush=True)
@@ -342,29 +344,36 @@ def index_documents() -> dict[str, Any]:
             if not chunks:
                 continue
             vectors = embed([chunk.text for chunk in chunks])
+            doc_points = []
             for chunk, vector in zip(chunks, vectors, strict=False):
                 point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{chunk.metadata['path']}:{chunk.metadata['chunk_index']}"))
-                points.append(
+                doc_points.append(
                     models.PointStruct(
                         id=point_id,
                         vector=vector,
                         payload={**chunk.metadata, "text": chunk.text},
                     )
                 )
+            if doc_points:
+                if not collection_initialized:
+                    ensure_collection(len(doc_points[0].vector))
+                    collection_initialized = True
+                
+                # Batch upsert points for the document just in case it is very large
+                batch_size = 100
+                for i in range(0, len(doc_points), batch_size):
+                    batch = doc_points[i : i + batch_size]
+                    qdrant().upsert(collection_name=collection_name(), points=batch, wait=True)
+                chunks_written += len(doc_points)
         except Exception as exc:
             errors.append({"path": path.relative_to(source_path()).as_posix(), "reason": str(exc)})
             print(f"  ✗ Error indexing {rel}: {exc}", flush=True)
 
-    if points:
-        ensure_collection(len(points[0].vector))
-        print(f"Writing {len(points)} chunks to Qdrant...", flush=True)
-        qdrant().upsert(collection_name=collection_name(), points=points, wait=True)
-        print("Indexing completed successfully.", flush=True)
-    else:
+    if not collection_initialized:
         ensure_collection(env_int("RAG_HASH_EMBEDDING_DIM", 384))
-        print("No chunks to write.", flush=True)
 
-    return {"documents": len(files), "chunks_written": len(points), "errors": errors}
+    print(f"Indexing completed successfully. Total chunks written: {chunks_written}", flush=True)
+    return {"documents": len(files), "chunks_written": chunks_written, "errors": errors}
 
 
 def search(query: str, top_k: int | None = None) -> dict[str, Any]:
