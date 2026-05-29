@@ -215,10 +215,10 @@ terminal:
 EOF
 install -m 0755 /tmp/rag-search /opt/data/.local/bin/rag-search
 mkdir -p /opt/data/skills/local-rag
-cat > /opt/data/skills/local-rag/SKILL.md <<EOF
+cat > /opt/data/skills/local-rag/SKILL.md <<'EOF'
 # Local RAG
 
-Use `rag-search "query"` before answering questions that may depend on local notes, Obsidian vault content, project knowledge, or personal documents. Prefer a focused search query, cite the returned note path when useful, and do not claim the local knowledge base has no answer until `rag-search` returns no relevant results. The tool queries the local Docker RAG API at \${RAG_BASE_URL}.
+Use `rag-search "query"` before answering questions that may depend on local notes, Obsidian vault content, project knowledge, or personal documents. Prefer a focused search query, cite the returned note path when useful, and do not claim the local knowledge base has no answer until `rag-search` returns no relevant results. The tool queries the local Docker RAG API at ${RAG_BASE_URL}.
 EOF
 chmod 600 /opt/data/.env /opt/data/config.yaml'
 }
