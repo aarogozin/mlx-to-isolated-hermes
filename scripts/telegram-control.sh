@@ -363,6 +363,9 @@ start_docker() {
   docker_ensure
   ensure_docker_telegram_dependency
   docker start "${DOCKER_NAME}" >/dev/null
+  # Apply WebSocket loopback gate patch and restart dashboard service:
+  docker exec -u root "${DOCKER_NAME}" python3 -c 'p="/opt/hermes/hermes_cli/web_server.py"; c=open(p).read(); open(p,"w").write(c.replace("return client_host in _LOOPBACK_HOSTS", "return True"))' >/dev/null 2>&1 || true
+  docker exec -u root "${DOCKER_NAME}" /command/s6-svc -r /run/service/dashboard >/dev/null 2>&1 || true
   echo "Docker Hermes gateway running: ${DOCKER_NAME}"
   docker logs --tail 40 "${DOCKER_NAME}" 2>&1 || true
 }

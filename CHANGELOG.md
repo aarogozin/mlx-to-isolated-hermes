@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1 — 2026-05-29
+
+Hotfix for Hermes Docker Dashboard Chat:
+
+- Fix dashboard chat session showing `[session ended]` and `events feed disconnected` inside Docker by patching the WebSocket loopback gate check to allow connections when `--insecure` is set.
+- Add `/opt/hermes/bin` and `/opt/hermes/.venv/bin` to the container's `PATH` to ensure the `hermes` executable can be spawned by the PTY.
+
 ## 0.5.0 — 2026-05-29
 
 Docker-first agent setup with host-visible persistent data and separated knowledge sources.

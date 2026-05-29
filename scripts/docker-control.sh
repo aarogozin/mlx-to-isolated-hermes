@@ -82,6 +82,9 @@ case "${ACTION}" in
       exit 0
     fi
     docker start "${DOCKER_NAME}" >/dev/null
+    # Apply WebSocket loopback gate patch and restart dashboard service:
+    docker exec -u root "${DOCKER_NAME}" python3 -c 'p="/opt/hermes/hermes_cli/web_server.py"; c=open(p).read(); open(p,"w").write(c.replace("return client_host in _LOOPBACK_HOSTS", "return True"))' >/dev/null 2>&1 || true
+    docker exec -u root "${DOCKER_NAME}" /command/s6-svc -r /run/service/dashboard >/dev/null 2>&1 || true
     echo "Docker sandbox running: ${DOCKER_NAME}"
     ;;
   stop)

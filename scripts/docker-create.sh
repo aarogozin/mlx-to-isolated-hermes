@@ -282,7 +282,7 @@ fi
   -e HERMES_DASHBOARD_PORT="${HERMES_DASHBOARD_PORT}" \
   -e HERMES_DASHBOARD_TUI="${HERMES_DASHBOARD_TUI:-1}" \
   -e HERMES_DASHBOARD_INSECURE="${HERMES_DASHBOARD_INSECURE}" \
-  -e PATH="/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  -e PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   "${mount_args[@]}" \
   "${DOCKER_IMAGE}" \
   gateway run >/dev/null
