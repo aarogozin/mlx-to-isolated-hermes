@@ -7,10 +7,10 @@ services:
     command: >
       sh -lc '
         if [ ! -x /venv/bin/python ]; then echo "Creating RAG API venv"; python -m venv /venv; fi &&
-        if ! /venv/bin/python -c "import fastapi, uvicorn, requests, qdrant_client" >/dev/null 2>&1; then
+        if ! /venv/bin/python -c "import fastapi, uvicorn, requests, qdrant_client" > /dev/null 2>&1; then
           echo "Installing RAG API Python dependencies into /venv";
-          /venv/bin/pip install --upgrade pip wheel >/dev/null &&
-          /venv/bin/pip install --upgrade fastapi uvicorn pydantic requests qdrant-client >/dev/null;
+          /venv/bin/pip install --upgrade pip wheel > /dev/null &&
+          /venv/bin/pip install --upgrade fastapi uvicorn pydantic requests qdrant-client > /dev/null;
         fi &&
         echo "Starting RAG API";
         exec /venv/bin/python /app/scripts/rag-container-api.py serve
@@ -46,10 +46,12 @@ services:
       RAG_TIKA_URL: http://tika:9998
       RAG_DOCLING_URL: http://docling:5001
     volumes:
-      - ${RAG_SOURCE_MOUNT:?Set RAG_SOURCE_MOUNT to your RAG source folder}:/source:ro
+      # Documents source — read-only. Set RAG_SOURCE_PATH in .env.
+      - ${RAG_SOURCE_MOUNT:?Set RAG_SOURCE_PATH in .env}:/source:ro
       - ./scripts:/app/scripts:ro
-      - ${RAG_API_VENV_MOUNT:-./.runtime/rag-api-venv}:/venv
-      - ${RAG_CACHE_MOUNT:-./.runtime/rag-cache}:/cache
+      # venv and cache use Docker volumes so pip installs survive restarts.
+      - rag-api-venv:/venv
+      - rag-cache:/cache
     depends_on:
       - qdrant
       - tika
@@ -60,7 +62,9 @@ services:
     container_name: ${RAG_QDRANT_NAME:-mlx-isolated-rag-qdrant}
     restart: unless-stopped
     volumes:
-      - ${RAG_QDRANT_MOUNT:-./.runtime/qdrant}:/qdrant/storage
+      # Vector index lives in a Docker volume — persists across restarts,
+      # survives make rag-down / rag-up without losing the index.
+      - rag-qdrant:/qdrant/storage
 
   tei:
     image: ${RAG_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-latest}
@@ -71,7 +75,7 @@ services:
     environment:
       HF_HOME: /cache/huggingface
     volumes:
-      - ${RAG_CACHE_MOUNT:-./.runtime/rag-cache}:/cache
+      - rag-cache:/cache
 
   tika:
     image: ${RAG_TIKA_IMAGE:-apache/tika:latest-full}
@@ -82,3 +86,10 @@ services:
     image: ${RAG_DOCLING_IMAGE:-quay.io/docling-project/docling-serve:latest}
     container_name: ${RAG_DOCLING_NAME:-mlx-isolated-rag-docling}
     restart: unless-stopped
+
+# Named Docker volumes — managed by Docker, survive make rag-down / rag-up.
+# To wipe and reindex from scratch: docker volume rm mlx-isolated-rag_rag-qdrant
+volumes:
+  rag-qdrant:
+  rag-api-venv:
+  rag-cache:

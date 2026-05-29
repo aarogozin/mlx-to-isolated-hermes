@@ -463,6 +463,37 @@ open_dashboard() {
   esac
 }
 
+update_agent() {
+  case "${AGENT_RUNTIME}:${target}" in
+    hermes:docker)
+      "${SCRIPT_DIR}/docker-control.sh" update
+      ;;
+    openclaw:docker)
+      # Pull latest OpenClaw image, recreate container, restart
+      local oc_name
+      oc_name="$(env_get OPENCLAW_DOCKER_NAME 2>/dev/null || true)"
+      oc_name="${oc_name:-omlx-agent-openclaw-docker}"
+      local oc_image
+      oc_image="$(docker inspect -f '{{.Config.Image}}' "${oc_name}" 2>/dev/null || true)"
+      if [[ -n "${oc_image}" ]]; then
+        echo "Pulling latest image: ${oc_image}..."
+        docker pull "${oc_image}" || true
+      fi
+      "${SCRIPT_DIR}/openclaw-control.sh" stop docker || true
+      OPENCLAW_PULL_POLICY=always "${SCRIPT_DIR}/openclaw-control.sh" start docker
+      echo "OpenClaw updated and restarted"
+      ;;
+    *:vm)
+      echo "agent-update is only supported for Docker backend. Use make agent-shell to update inside the VM."
+      exit 1
+      ;;
+    *)
+      echo "Unknown runtime/target: ${AGENT_RUNTIME}/${target}"
+      exit 1
+      ;;
+  esac
+}
+
 case "${ACTION}" in
   start) start_agent ;;
   stop) stop_agent ;;
@@ -474,6 +505,7 @@ case "${ACTION}" in
   logs) logs_agent ;;
   shell) shell_agent ;;
   open-dashboard) open_dashboard ;;
+  update) update_agent ;;
   *)
     usage
     exit 2

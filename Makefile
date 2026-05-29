@@ -158,7 +158,7 @@ agent-open-dashboard:
 	./scripts/agent-control.sh open-dashboard
 
 agent-update:
-	./scripts/docker-control.sh update
+	./scripts/agent-control.sh update
 
 agent-data:
 	./scripts/docker-control.sh data-path

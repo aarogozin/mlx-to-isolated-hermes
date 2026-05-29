@@ -57,54 +57,66 @@ are written, and packages can be installed.
 
 ## Persistent Data
 
-All agent state is stored on the host and bind-mounted into the container,
-so nothing is lost across restarts or image updates.
-
-| What | Host path | Variable |
+| What | Where | Variable |
 |---|---|---|
-| Agent config, skills, workspace | `.runtime/agent/` (default) | `AGENT_DATA_DIR` |
-| Obsidian vault (agent workspace) | your folder | `OBSIDIAN_SHARED_PATH` |
-| Documents for RAG | your folder | `RAG_SOURCE_PATH` |
-| RAG vector index | Docker volume `mlx-isolated-rag_qdrant` | — |
+| Agent config, skills, workspace | Host: `.runtime/agent/` (default) | `AGENT_DATA_DIR` |
+| Agent Obsidian workspace | Host: your folder → `/mnt/obsidian` (rw) | `OBSIDIAN_SHARED_PATH` |
+| Documents for RAG indexing | Host: your folder → `/source` (ro, RAG only) | `RAG_SOURCE_PATH` |
+| RAG vector index (Qdrant) | **Docker volume** `mlx-isolated-rag_rag-qdrant` | — |
+| RAG Python venv | Docker volume `mlx-isolated-rag_rag-api-venv` | — |
+
+Agent data is bind-mounted so files are visible on the host. RAG index and
+Python dependencies live in Docker named volumes — they survive `make rag-down`
+and are not polluting your project directory.
 
 Set `AGENT_DATA_DIR` to a path outside the project (e.g. `~/.local/share/omlx-agent`)
-if you want agent data to survive `git clean`.
+to keep agent data across `git clean`.
 
 ```bash
-make agent-data      # show current agent data directory on host
-make agent-update    # pull latest image and restart without losing data
+make agent-data      # show current host path for agent data
+make agent-update    # pull latest Hermes or OpenClaw image, restart, keep all data
 ```
 
 ---
 
 ## Knowledge Sources
 
-The stack supports two distinct knowledge paths:
+The agent has two distinct ways to access your content:
 
-**`OBSIDIAN_SHARED_PATH`** — agent workspace, mounted **read-write** at
-`/mnt/obsidian` inside the container. The agent can read existing notes and
-create new ones here directly via file tools.
+### `OBSIDIAN_SHARED_PATH` — active workspace
 
-**`RAG_SOURCE_PATH`** — documents library, mounted **read-only** into the RAG
-container only. PDFs, Word files, spreadsheets, and scanned images are indexed
-and made searchable through `rag-search`. The agent container does **not** get
-a direct mount to this folder — it accesses the content exclusively via
-`rag-search`, preventing confusion between direct file access and semantic
-retrieval.
+Mounted **read-write** at `/mnt/obsidian` inside the agent container.
+The agent can read notes, create new files, and follow links here using its
+file tools directly.
 
-Both paths can point to the same folder (the wizard default) or to separate
-directories. Separating them is recommended when your documents library is
-large or contains binary files the agent should not browse directly.
+### `RAG_SOURCE_PATH` — passive document library
+
+Mounted **read-only** into the **RAG container only** — the agent container
+does **not** get a mount to this folder.
+PDFs, Word files, spreadsheets, scanned images, and notes are indexed into
+Qdrant and made searchable through the `rag-search` tool.
+
+This separation means the agent always retrieves knowledge through semantic
+search rather than browsing raw files, which prevents confusion when the
+documents library is large or contains binary files.
+
+Both variables can point to the **same folder** (wizard default) or to
+separate directories. Separate paths are recommended when your documents
+library is large or distinct from your active notes.
 
 ```bash
-make rag-index-status   # show indexing progress
-make rag-search QUERY="what did we decide about X?"
-make rag-status
+# .env — the two lines that matter
+OBSIDIAN_SHARED_PATH=/Users/you/vault       # agent reads/writes here
+RAG_SOURCE_PATH=/Users/you/documents        # RAG indexes here, agent cannot browse
 ```
 
-Indexed by default: Markdown, plain text, JSON/YAML/TOML/XML/HTML, CSV/TSV,
-Office documents (xlsx/ods), PDFs, and images through containerized
-Docling/Tika with needed-only OCR.
+```bash
+make rag-index-status   # indexing progress
+make rag-search QUERY="what did we decide about X?"
+make rag-status
+# Wipe index and reindex from scratch:
+# docker volume rm mlx-isolated-rag_rag-qdrant && make rag-up && make rag-index
+```
 
 ---
 
