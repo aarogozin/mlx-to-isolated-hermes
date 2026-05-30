@@ -248,11 +248,13 @@ if docker container inspect "${DOCKER_NAME}" >/dev/null 2>&1; then
   current_command="$(docker inspect -f '{{join .Config.Cmd " "}}' "${DOCKER_NAME}")"
   current_extra_hosts="$(docker inspect -f '{{range .HostConfig.ExtraHosts}}{{println .}}{{end}}' "${DOCKER_NAME}")"
   current_insecure="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${DOCKER_NAME}" | grep '^HERMES_DASHBOARD_INSECURE=' | cut -d= -f2 || true)"
+  current_tui="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${DOCKER_NAME}" | grep '^HERMES_DASHBOARD_TUI=' | cut -d= -f2 || true)"
   if [[ "${current_image_id}" == "${desired_image_id}" \
     && "${current_dashboard_port}" == "${desired_dashboard_port}" \
     && "${current_gateway_port}" == "${desired_gateway_port}" \
     && "${current_command}" == "${desired_command}" \
     && "${current_insecure}" == "${HERMES_DASHBOARD_INSECURE}" \
+    && "${current_tui}" == "${HERMES_DASHBOARD_TUI}" \
     && "${current_extra_hosts}" == *"rag-host.internal:host-gateway"* ]]; then
     echo "Docker container already exists: ${DOCKER_NAME}"
     echo "Image: ${DOCKER_IMAGE}"
@@ -280,7 +282,7 @@ fi
   -e HERMES_DASHBOARD=1 \
   -e HERMES_DASHBOARD_HOST=0.0.0.0 \
   -e HERMES_DASHBOARD_PORT="${HERMES_DASHBOARD_PORT}" \
-  -e HERMES_DASHBOARD_TUI="${HERMES_DASHBOARD_TUI:-1}" \
+  -e HERMES_DASHBOARD_TUI="${HERMES_DASHBOARD_TUI:-0}" \
   -e HERMES_DASHBOARD_INSECURE="${HERMES_DASHBOARD_INSECURE}" \
   -e PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   "${mount_args[@]}" \

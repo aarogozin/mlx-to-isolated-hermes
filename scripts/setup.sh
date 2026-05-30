@@ -211,6 +211,7 @@ choose_runtime() {
   env_put SANDBOX_BACKEND "docker"
   env_put TELEGRAM_TARGET "docker"
   env_put DASHBOARD_TARGET "docker"
+  env_put HERMES_DASHBOARD_TUI "0"
   BACKEND="docker"
 
   case "${idx}" in

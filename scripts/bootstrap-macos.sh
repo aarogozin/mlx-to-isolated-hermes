@@ -432,6 +432,7 @@ configure_project_env() {
   set_env_value DOCKER_DASHBOARD_PORT "9120"
   set_env_value HERMES_GATEWAY_API_PORT "8642"
   set_env_value DOCKER_GATEWAY_API_PORT "8642"
+  set_env_value HERMES_DASHBOARD_TUI "0"
   set_env_value OPENAI_BASE_URL_DOCKER "http://host.docker.internal:8000/v1"
   set_env_value ANTHROPIC_BASE_URL_DOCKER "http://host.docker.internal:8000"
   set_env_value OPENCLAW_IMAGE "ghcr.io/openclaw/openclaw:latest"
