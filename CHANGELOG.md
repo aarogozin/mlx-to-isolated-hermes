@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.5 — 2026-05-30
+
+Preserved TUI preferences and dashboard chat activation:
+
+- **TUI Preference Preservation**: Updated `setup.sh` to only set `HERMES_DASHBOARD_TUI` to `"0"` by default if it is not already defined in the configuration, preventing subsequent setup runs from disabling the Chat tab.
+
 ## 0.5.4 — 2026-05-30
 
 Dynamic command hints and Hermes WebSocket loopback gate fixes:
