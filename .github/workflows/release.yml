@@ -99,7 +99,7 @@ jobs:
           mkdir -p Formula
 
           # Write the new Formula content
-          cat <<'EOF' | sed 's/^          //' > Formula/omlx-agent.rb
+          cat <<EOF | sed 's/^          //' > Formula/omlx-agent.rb
           class OmlxAgent < Formula
             desc "MLX Isolated Agent Stack CLI"
             homepage "https://github.com/aarogozin/mlx-to-isolated-hermes"
