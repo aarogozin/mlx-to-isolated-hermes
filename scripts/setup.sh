@@ -344,6 +344,89 @@ preflight_active_agent() {
   esac
 }
 
+preflight_port_conflicts() {
+  step "Port conflict check"
+
+  if [[ -f "${ENV_FILE}" ]]; then
+    set -a
+    source "${ENV_FILE}"
+    set +a
+  fi
+
+  local -a ports=()
+  local -a labels=()
+  if [[ "${AGENT_RUNTIME}" == "hermes" ]]; then
+    ports+=("${DOCKER_DASHBOARD_PORT:-9120}" "${DOCKER_GATEWAY_API_PORT:-8642}")
+    labels+=("Hermes Dashboard" "Hermes Gateway API")
+  else
+    ports+=("${OPENCLAW_CONTROL_PORT:-18789}")
+    labels+=("OpenClaw Control")
+    if [[ "${OPENCLAW_EXPOSE_BRIDGE_PORT:-0}" == "1" || "${OPENCLAW_EXPOSE_BRIDGE_PORT:-0}" == "true" ]]; then
+      ports+=("${OPENCLAW_BRIDGE_PORT:-18790}")
+      labels+=("OpenClaw Bridge")
+    fi
+  fi
+
+  local conflict_found=0
+  for i in "${!ports[@]}"; do
+    local port="${ports[$i]}"
+    local label="${labels[$i]}"
+    local pid_info
+    pid_info="$(lsof -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | tail -n +2 || true)"
+    if [[ -n "${pid_info}" ]]; then
+      conflict_found=1
+      local proc_name
+      local pid
+      proc_name="$(echo "${pid_info}" | awk '{print $1}')"
+      pid="$(echo "${pid_info}" | awk '{print $2}')"
+      warn "Port ${port} (${label}) is already in use by process '${proc_name}' (PID: ${pid})."
+      
+      if [[ "${proc_name}" == "docker-pr"* || "${proc_name}" == "com.docke"* ]]; then
+        local container_name
+        container_name="$(docker ps --filter "publish=${port}" --format '{{.Names}}' 2>/dev/null || true)"
+        if [[ -n "${container_name}" ]]; then
+          warn "Port is mapped by running container: ${container_name}."
+        fi
+      fi
+    fi
+  done
+
+  if [[ "${conflict_found}" -eq 1 ]]; then
+    local idx
+    idx="$(choose_menu "Port conflicts detected. How should setup proceed?" \
+      "Attempt to kill conflicting host processes and continue" \
+      "Ignore and continue anyway (may fail to start)" \
+      "Abort setup")"
+    case "${idx}" in
+      0)
+        for port in "${ports[@]}"; do
+          local pids
+          pids="$(lsof -t -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"
+          if [[ -n "${pids}" ]]; then
+            for pid in ${pids}; do
+              local comm
+              comm="$(ps -p "${pid}" -o comm= 2>/dev/null || true)"
+              if [[ "${comm}" != *"docker"* && "${comm}" != *"launchd"* ]]; then
+                substep "Killing process '${comm}' (PID: ${pid}) occupying port ${port}..."
+                kill -9 "${pid}" 2>/dev/null || true
+              fi
+            done
+          fi
+        done
+        ok "Port cleanup finished."
+        ;;
+      1)
+        ok "Continuing despite conflicts."
+        ;;
+      2)
+        abort_setup "Setup aborted due to port conflicts."
+        ;;
+    esac
+  else
+    ok "All required ports are available"
+  fi
+}
+
 # ── Step 4: Credentials ───────────────────────────────────────────────────────
 configure_credentials() {
   step "Credentials"
@@ -792,6 +875,7 @@ main() {
   run_bootstrap_if_needed
   choose_runtime          # Step 3: Hermes or OpenClaw — always Docker
   preflight_active_agent  # Step 4: conflict detection
+  preflight_port_conflicts # Step 4b: check for port conflicts on host
   configure_credentials   # Step 5: API key + Telegram
   configure_model         # Step 6: model selection
   configure_rag           # Step 7: RAG yes/no + source path
