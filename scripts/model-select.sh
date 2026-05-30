@@ -70,22 +70,13 @@ MODEL="${selected}" "${SCRIPT_DIR}/models-sync-omlx.sh"
 
 echo
 echo "==> Syncing Hermes model catalog"
-case "${OVERRIDE_SANDBOX_BACKEND:-${SANDBOX_BACKEND:-multipass}}" in
-  docker)
-    if command -v docker >/dev/null 2>&1; then
-      if ! "${SCRIPT_DIR}/docker-create.sh"; then
-        echo "warn Docker Hermes sync failed. Run ./scripts/docker-create.sh after Docker is ready." >&2
-      fi
-    else
-      echo "warn Docker CLI missing; skipped Docker Hermes sync." >&2
-    fi
-    ;;
-  *)
-    if ! "${SCRIPT_DIR}/hermes-sync-models.sh"; then
-      echo "warn Hermes sync failed. Run ./scripts/e2e-ready.sh after VM/Docker are ready." >&2
-    fi
-    ;;
-esac
+if command -v docker >/dev/null 2>&1; then
+  if ! "${SCRIPT_DIR}/docker-create.sh"; then
+    echo "warn Docker Hermes sync failed. Run ./scripts/docker-create.sh after Docker is ready." >&2
+  fi
+else
+  echo "warn Docker CLI missing; skipped Docker Hermes sync." >&2
+fi
 
 echo
 echo "Selected local model: ${selected}"

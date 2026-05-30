@@ -74,28 +74,7 @@ check_lms() {
   fi
 }
 
-check_user_ssh_key() {
-  local user_key="${USER_SSH_PUBLIC_KEY:-${HOME}/.ssh/id_ed25519.pub}"
-
-  if [[ -f "${user_key}" ]]; then
-    pass "user SSH public key: ${user_key}"
-  else
-    warn "user SSH public key not found: ${user_key}; vm-create will still generate ${VM_SSH_KEY:-${HOME}/.ssh/omlx_agent_vm_ed25519}.pub"
-  fi
-}
-
-check_multipass() {
-  if command -v multipass >/dev/null 2>&1; then
-    pass "multipass: $(command -v multipass)"
-    if multipass version >/dev/null 2>&1; then
-      pass "Multipass daemon reachable"
-    else
-      warn "multipass CLI exists, but daemon is not reachable; launch/open Multipass once"
-    fi
-  else
-    fail "multipass missing"
-  fi
-}
+# VM / SSH / Multipass checks removed
 
 check_docker() {
   if [[ -d "/Applications/Docker.app" ]]; then
@@ -193,11 +172,9 @@ main() {
   check_command "pnpm" pnpm
   check_command "omlx" omlx
   check_lms
-  check_user_ssh_key
   check_model_dir
   check_model_artifacts
 
-  check_multipass
   check_docker
   check_model_api
   check_rag

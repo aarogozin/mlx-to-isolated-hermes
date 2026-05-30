@@ -48,7 +48,7 @@ if [[ -n "${OVERRIDE_MATRIX_REPORT_DIR_SET}" ]]; then
   MATRIX_REPORT_DIR="${OVERRIDE_MATRIX_REPORT_DIR}"
 fi
 
-MATRIX_MODES="${MATRIX_MODES:-hermes/docker hermes/multipass openclaw/docker openclaw/multipass}"
+MATRIX_MODES="${MATRIX_MODES:-hermes/docker openclaw/docker}"
 MATRIX_CLEAN_MODE="${MATRIX_CLEAN_MODE:-once}"
 MATRIX_TELEGRAM="${MATRIX_TELEGRAM:-disabled}"
 MATRIX_FINAL_ACTION="${MATRIX_FINAL_ACTION:-pause}"
@@ -66,9 +66,7 @@ if [[ "${MATRIX_RAG_SOURCE_MODE}" == "synthetic" && -z "${OVERRIDE_MATRIX_RAG_QU
   MATRIX_RAG_QUERY="${MATRIX_RAG_SENTINEL}"
 fi
 
-HERMES_VM_NAME="${HERMES_VM_NAME:-${VM_NAME:-omlx-agent-ubuntu}}"
-OPENCLAW_VM_NAME="${OPENCLAW_VM_NAME:-omlx-openclaw-ubuntu}"
-VM_SSH_USER="${VM_SSH_USER:-agent}"
+# VM variables removed as only Docker is supported
 DOCKER_NAME="${DOCKER_NAME:-omlx-agent-docker}"
 OPENCLAW_DOCKER_NAME="${OPENCLAW_DOCKER_NAME:-omlx-agent-openclaw-docker}"
 RAG_PORT="${RAG_PORT:-8765}"
@@ -140,14 +138,14 @@ EOF
 
 oMLX serves MLX models on the Apple Silicon host through an OpenAI-compatible API.
 LM Studio is used as the local catalog and download manager for model artifacts.
-The matrix smoke test expects Docker and Multipass sandboxes to reach model-host.internal and rag-host.internal.
+The matrix smoke test expects Docker sandboxes to reach model-host.internal and rag-host.internal.
 EOF
 
   cat > "${vault}/data/config.json" <<EOF
 {
   "fixture": "matrix-e2e",
   "runtime": ["hermes", "openclaw"],
-  "backend": ["docker", "multipass"],
+  "backend": ["docker"],
   "sentinel": "${MATRIX_RAG_SENTINEL}"
 }
 EOF
@@ -403,18 +401,7 @@ mode_runtime() {
 
 mode_backend() {
   local backend="${1#*/}"
-  case "${backend}" in
-    vm) printf 'multipass\n' ;;
-    *) printf '%s\n' "${backend}" ;;
-  esac
-}
-
-runtime_vm_name() {
-  case "$1" in
-    hermes) printf '%s\n' "${HERMES_VM_NAME}" ;;
-    openclaw) printf '%s\n' "${OPENCLAW_VM_NAME}" ;;
-    *) die "unsupported runtime: $1" ;;
-  esac
+  printf '%s\n' "${backend}"
 }
 
 runtime_docker_name() {
@@ -431,8 +418,7 @@ sandbox_env_file() {
   case "${runtime}/${backend}" in
     hermes/docker) printf '/opt/data/.env\n' ;;
     openclaw/docker) printf '\n' ;;
-    hermes/multipass) printf '/home/%s/.hermes/.env\n' "${VM_SSH_USER}" ;;
-    openclaw/multipass) printf '/home/%s/.openclaw/.env\n' "${VM_SSH_USER}" ;;
+    *) die "unsupported runtime/backend: ${runtime}/${backend}" ;;
   esac
 }
 
@@ -542,64 +528,42 @@ run_in_sandbox() {
   local env_file
   env_file="$(sandbox_env_file "${runtime}" "${backend}")"
 
-  if [[ "${backend}" == "docker" ]]; then
-    local container
-    container="$(runtime_docker_name "${runtime}")"
-    docker exec -i \
-      -e "MATRIX_ENV_FILE=${env_file}" \
-      -e "RAG_QUERY=${MATRIX_RAG_QUERY}" \
-      -e "RAG_EXPECTED=${MATRIX_RAG_EXPECTED_TEXT}" \
-      -e "RAG_EXPECTED_PATH=${MATRIX_RAG_EXPECTED_PATH}" \
-      -e "RAG_BASE_URL=http://rag-host.internal:${RAG_PORT}" \
-      -e "MATRIX_CHAT_TIMEOUT_SECONDS=${MATRIX_CHAT_TIMEOUT_SECONDS}" \
-      "${container}" sh -s < "${script_path}"
-  else
-    local vm
-    local remote_script
-    vm="$(runtime_vm_name "${runtime}")"
-    remote_script="/tmp/$(basename "${script_path}")"
-    multipass transfer "${script_path}" "${vm}:${remote_script}" >/dev/null
-    multipass exec "${vm}" -- sudo -Hu "${VM_SSH_USER}" env \
-      "MATRIX_ENV_FILE=${env_file}" \
-      "RAG_QUERY=${MATRIX_RAG_QUERY}" \
-      "RAG_EXPECTED=${MATRIX_RAG_EXPECTED_TEXT}" \
-      "RAG_EXPECTED_PATH=${MATRIX_RAG_EXPECTED_PATH}" \
-      "RAG_BASE_URL=http://rag-host.internal:${RAG_PORT}" \
-      "MATRIX_CHAT_TIMEOUT_SECONDS=${MATRIX_CHAT_TIMEOUT_SECONDS}" \
-      sh "${remote_script}"
+  if [[ "${backend}" != "docker" ]]; then
+    die "unsupported backend: ${backend}"
   fi
+
+  local container
+  container="$(runtime_docker_name "${runtime}")"
+  docker exec -i \
+    -e "MATRIX_ENV_FILE=${env_file}" \
+    -e "RAG_QUERY=${MATRIX_RAG_QUERY}" \
+    -e "RAG_EXPECTED=${MATRIX_RAG_EXPECTED_TEXT}" \
+    -e "RAG_EXPECTED_PATH=${MATRIX_RAG_EXPECTED_PATH}" \
+    -e "RAG_BASE_URL=http://rag-host.internal:${RAG_PORT}" \
+    -e "MATRIX_CHAT_TIMEOUT_SECONDS=${MATRIX_CHAT_TIMEOUT_SECONDS}" \
+    "${container}" sh -s < "${script_path}"
 }
 
 target_ready_check() {
   local runtime="$1"
   local backend="$2"
 
-  if [[ "${backend}" == "docker" ]]; then
-    local container
-    container="$(runtime_docker_name "${runtime}")"
-    docker container inspect "${container}" >/dev/null 2>&1 || {
-      echo "target-ready=missing container=${container}"
-      return 1
-    }
-    [[ "$(docker inspect -f '{{.State.Running}}' "${container}")" == "true" ]] || {
-      echo "target-ready=stopped container=${container}"
-      return 1
-    }
-    echo "target-ready=ok container=${container}"
-    return 0
+  if [[ "${backend}" != "docker" ]]; then
+    die "unsupported backend: ${backend}"
   fi
 
-  local vm
-  vm="$(runtime_vm_name "${runtime}")"
-  multipass info "${vm}" >/dev/null 2>&1 || {
-    echo "target-ready=missing vm=${vm}"
+  local container
+  container="$(runtime_docker_name "${runtime}")"
+  docker container inspect "${container}" >/dev/null 2>&1 || {
+    echo "target-ready=missing container=${container}"
     return 1
   }
-  [[ "$(multipass info "${vm}" | awk '/State/ { print $2; exit }')" == "Running" ]] || {
-    echo "target-ready=stopped vm=${vm}"
+  [[ "$(docker inspect -f '{{.State.Running}}' "${container}")" == "true" ]] || {
+    echo "target-ready=stopped container=${container}"
     return 1
   }
-  echo "target-ready=ok vm=${vm}"
+  echo "target-ready=ok container=${container}"
+  return 0
 }
 
 shared_folder_check() {
@@ -611,18 +575,15 @@ shared_folder_check() {
     return 0
   fi
 
-  if [[ "${backend}" == "docker" ]]; then
-    AGENT_RUNTIME="${runtime}" \
-    SANDBOX_BACKEND="${backend}" \
-    DOCKER_NAME="$(runtime_docker_name "${runtime}")" \
-    "${SCRIPT_DIR}/shared-mounts-check.sh" "${backend}"
-    return $?
+  if [[ "${backend}" != "docker" ]]; then
+    die "unsupported backend: ${backend}"
   fi
 
   AGENT_RUNTIME="${runtime}" \
   SANDBOX_BACKEND="${backend}" \
-  VM_NAME="$(runtime_vm_name "${runtime}")" \
+  DOCKER_NAME="$(runtime_docker_name "${runtime}")" \
   "${SCRIPT_DIR}/shared-mounts-check.sh" "${backend}"
+  return $?
 }
 
 dashboard_check() {
@@ -633,14 +594,11 @@ dashboard_check() {
     hermes/docker)
       DASHBOARD_TARGET=docker "${SCRIPT_DIR}/dashboard-control.sh" status
       ;;
-    hermes/multipass)
-      VM_NAME="${HERMES_VM_NAME}" DASHBOARD_TARGET=vm "${SCRIPT_DIR}/dashboard-control.sh" status
-      ;;
     openclaw/docker)
       "${SCRIPT_DIR}/openclaw-control.sh" status docker
       ;;
-    openclaw/multipass)
-      VM_NAME="${OPENCLAW_VM_NAME}" "${SCRIPT_DIR}/openclaw-control.sh" status multipass
+    *)
+      die "unsupported runtime/backend: ${runtime}/${backend}"
       ;;
   esac
 }
@@ -710,7 +668,7 @@ run_mode() {
   runtime="$(mode_runtime "${mode}")"
   backend="$(mode_backend "${mode}")"
   [[ "${runtime}" == "hermes" || "${runtime}" == "openclaw" ]] || die "unsupported runtime in MATRIX_MODES: ${mode}"
-  [[ "${backend}" == "docker" || "${backend}" == "multipass" ]] || die "unsupported backend in MATRIX_MODES: ${mode}"
+  [[ "${backend}" == "docker" ]] || die "unsupported backend in MATRIX_MODES: ${mode}"
 
   current_mode="${runtime}/${backend}"
   local mode_id="${runtime}-${backend}"

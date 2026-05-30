@@ -27,8 +27,6 @@ jobs:
       - name: Check tracked text is English-only
         run: scripts/check-english-text.py
 
-      - name: Shared folder mock tests
-        run: scripts/test-shared-mounts-mock.sh
 
       - name: Python syntax and RAG unit tests
         run: |

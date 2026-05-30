@@ -3,8 +3,7 @@ SHELL := /bin/bash
 .PHONY: help bootstrap setup doctor clean-all release-check ci-check matrix-e2e \
 	models-search models-list models-sync models-doctor models-prune-incomplete model-select model-start-bg model-stop-bg model-check omlx-update \
 	rag-install rag-preflight rag-index rag-sync rag-search rag-start rag-stop rag-status rag-doctor rag-up rag-down rag-logs rag-index-status rag-update \
-	agent-start agent-stop agent-restart agent-pause agent-switch agent-status agent-logs agent-shell agent-open-dashboard agent-update agent-data \
-	vm-ssh vm-status shared-mounts-check
+	agent-start agent-stop agent-restart agent-pause agent-switch agent-status agent-logs agent-shell agent-open-dashboard agent-update agent-data
 
 help:
 	@printf '%s\n' 'mlx-to-isolated-agent commands'
@@ -54,7 +53,7 @@ release-check:
 	./scripts/release-check.sh
 
 ci-check:
-	SKIP_HOST_DOCTOR=1 SKIP_RAG_E2E=1 SKIP_VM_E2E=1 SKIP_DOCKER_E2E=1 ./scripts/release-check.sh
+	SKIP_HOST_DOCTOR=1 SKIP_RAG_E2E=1 SKIP_DOCKER_E2E=1 ./scripts/release-check.sh
 	RAG_EMBEDDING_BACKEND=hash MATRIX_MODES=" " MATRIX_CLEAN_MODE=none MATRIX_REPORT_DIR=.runtime/matrix-e2e/ci-synthetic ./scripts/matrix-e2e.sh
 	./scripts/test-openclaw-docker-command-mock.sh
 
@@ -175,11 +174,4 @@ agent-update:
 agent-data:
 	./scripts/docker-control.sh data-path
 
-vm-ssh:
-	./scripts/vm-control.sh ssh
 
-vm-status:
-	./scripts/vm-control.sh status
-
-shared-mounts-check:
-	./scripts/shared-mounts-check.sh

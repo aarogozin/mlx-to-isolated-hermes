@@ -62,23 +62,7 @@
    ```bash
    AGENT_RUNTIME=openclaw SANDBOX_BACKEND=docker make agent-start
    AGENT_RUNTIME=openclaw SANDBOX_BACKEND=docker make agent-stop
-   AGENT_RUNTIME=openclaw SANDBOX_BACKEND=multipass make agent-switch
-   AGENT_RUNTIME=openclaw SANDBOX_BACKEND=multipass make agent-pause
-   ```
-
-   Confirm Hermes and OpenClaw use separate VMs:
-
-   ```bash
-   AGENT_RUNTIME=hermes make vm-status
-   AGENT_RUNTIME=openclaw make vm-status
-   ```
-
-9. Optional Multipass snapshot check through the low-level VM script:
-
-   ```bash
-   ./scripts/vm-control.sh stop
-   ./scripts/vm-control.sh snapshot
-   ./scripts/vm-control.sh start
+   AGENT_RUNTIME=openclaw SANDBOX_BACKEND=docker make agent-pause
    ```
 
 10. Run final release gate:

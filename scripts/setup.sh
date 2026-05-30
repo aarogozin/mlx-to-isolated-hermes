@@ -127,7 +127,7 @@ BANNER
 
 # ── Step 1: Detect current state ──────────────────────────────────────────────
 HAVE_BREW=0; HAVE_LMS=0; HAVE_OMLX=0
-HAVE_MULTIPASS=0; HAVE_DOCKER=0
+HAVE_DOCKER=0
 OMLX_RUNNING=0
 
 detect_state() {
@@ -608,18 +608,7 @@ verify_rag_after_deploy() {
           "curl -fsS --max-time 5 http://rag-host.internal:${rag_port}/health" 2>&1 || true)"
       fi
       ;;
-    multipass)
-      local vm_name
-      local vm_user
-      if [[ "${AGENT_RUNTIME}" == "openclaw" ]]; then
-        vm_name="$(env_get OPENCLAW_VM_NAME)"; vm_name="${vm_name:-omlx-openclaw-ubuntu}"
-      else
-        vm_name="$(env_get HERMES_VM_NAME)"; vm_name="${vm_name:-$(env_get VM_NAME)}"; vm_name="${vm_name:-omlx-agent-ubuntu}"
-      fi
-      vm_user="$(env_get VM_SSH_USER)"; vm_user="${vm_user:-agent}"
-      health_output="$(multipass exec "${vm_name}" -- \
-        curl -fsS --max-time 5 "http://rag-host.internal:${rag_port}/health" 2>&1 || true)"
-      ;;
+
   esac
 
   if printf '%s\n' "${health_output}" | grep -q '"ok":true'; then
@@ -770,12 +759,7 @@ DONE
   printf "  ${DIM}  make rag-search QUERY=\"...\" ${RESET}# query local RAG\n"
   printf "  ${DIM}  make rag-index-status     ${RESET}# show indexing progress\n"
   printf "  ${DIM}  make rag-status           ${RESET}# RAG service status\n"
-  if [[ "${BACKEND}" != "docker" ]]; then
-    printf "  ${DIM}  make vm-ssh               ${RESET}# SSH into the agent VM\n"
-    printf "  ${DIM}  make vm-status            ${RESET}# show VM status and IP\n"
-  else
     printf "  ${DIM}  make agent-shell          ${RESET}# shell into the Docker agent\n"
-  fi
   [[ -n "${tg_token}" ]] && printf "  ${DIM}  make agent-status         ${RESET}# check gateway status\n"
   printf "\n"
 

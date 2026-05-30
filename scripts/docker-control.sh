@@ -53,6 +53,48 @@ if ! command -v docker >/dev/null 2>&1; then
   esac
 fi
 
+get_agent_data_path() {
+  local data_path
+  if [[ -n "${AGENT_DATA_DIR:-}" ]]; then
+    data_path="${AGENT_DATA_DIR}"
+    case "${data_path}" in
+      /*) ;;
+      *) data_path="${SCRIPT_DIR}/../${data_path}" ;;
+    esac
+  else
+    data_path="${SCRIPT_DIR}/../.runtime/agent"
+  fi
+  mkdir -p "${data_path}"
+  data_path="$(cd "${data_path}" 2>/dev/null && pwd || echo "${data_path}")"
+  echo "${data_path}"
+}
+
+clean_gateway_locks() {
+  local data_path
+  data_path="$(get_agent_data_path)"
+  if [[ -d "${data_path}" ]]; then
+    echo "Cleaning gateway lock and state files in ${data_path}..."
+    rm -f "${data_path}/gateway.pid" "${data_path}/gateway.lock" "${data_path}/gateway_state.json"
+    rm -rf "${data_path}/.local/state/hermes/gateway-locks"/* 2>/dev/null || true
+    
+    local proc_file="${data_path}/processes.json"
+    if [[ -f "${proc_file}" ]]; then
+      python3 -c '
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+if p.exists():
+    try:
+        data = json.loads(p.read_text())
+        filtered = [x for x in data if "gateway run" not in x.get("command", "")]
+        p.write_text(json.dumps(filtered, indent=2))
+    except Exception:
+        p.unlink(missing_ok=True)
+' "${proc_file}" || true
+    fi
+  fi
+}
+
 container_exists() {
   docker container inspect "${DOCKER_NAME}" >/dev/null 2>&1
 }
@@ -68,6 +110,7 @@ ensure_container() {
 }
 
 docker_start_and_patch() {
+  clean_gateway_locks
   docker start "${DOCKER_NAME}" >/dev/null
   # Apply WebSocket loopback gate patch and restart dashboard service:
   docker exec -u root "${DOCKER_NAME}" python3 -c 'p="/opt/hermes/hermes_cli/web_server.py"; c=open(p).read(); open(p,"w").write(c.replace("return client_host in _LOOPBACK_HOSTS", "return True"))' >/dev/null 2>&1 || true
@@ -77,27 +120,24 @@ docker_start_and_patch() {
 case "${ACTION}" in
   start)
     ensure_container
+    clean_gateway_locks
     if [[ -n "${TELEGRAM_BOT_TOKEN}" ]]; then
-      # Stop any VM gateway that might conflict with Docker's Telegram polling.
-      # The status check can be unreliable, so also do a direct process kill in the VM.
-      TELEGRAM_TARGET=vm "${SCRIPT_DIR}/telegram-control.sh" stop 2>/dev/null || true
-      if command -v multipass >/dev/null 2>&1; then
-        multipass exec "${VM_NAME:-omlx-agent-ubuntu}" -- bash -c \
-          'pkill -f "gateway run" 2>/dev/null; rm -f "$HOME/.hermes/gateway.pid"' 2>/dev/null || true
-      fi
-      TELEGRAM_TARGET=docker "${SCRIPT_DIR}/telegram-control.sh" start
+      "${SCRIPT_DIR}/telegram-control.sh" start
       exit 0
     fi
     docker_start_and_patch
     echo "Docker sandbox running: ${DOCKER_NAME}"
+    exit 0
     ;;
   stop)
     if container_exists; then
       docker stop "${DOCKER_NAME}" >/dev/null || true
+      clean_gateway_locks
       echo "Docker sandbox stopped: ${DOCKER_NAME}"
     else
       echo "Docker sandbox does not exist: ${DOCKER_NAME}"
     fi
+    exit 0
     ;;
   shell)
     ensure_container
@@ -113,6 +153,7 @@ case "${ACTION}" in
   reset)
     if container_exists; then
       docker stop "${DOCKER_NAME}" >/dev/null || true
+      clean_gateway_locks
       docker rm "${DOCKER_NAME}" >/dev/null
       echo "Removed Docker sandbox container: ${DOCKER_NAME}"
     fi
@@ -122,10 +163,12 @@ case "${ACTION}" in
     else
       echo "Preserved Docker volumes. Set DOCKER_RESET_DATA=1 to remove Hermes data and workspace."
     fi
+    exit 0
     ;;
   destroy)
     if container_exists; then
       docker stop "${DOCKER_NAME}" >/dev/null 2>&1 || true
+      clean_gateway_locks
       docker rm "${DOCKER_NAME}" >/dev/null 2>&1 || true
       echo "Removed Docker sandbox container: ${DOCKER_NAME}"
     else
@@ -133,6 +176,7 @@ case "${ACTION}" in
     fi
     docker volume rm "${DOCKER_DATA_VOLUME}" "${DOCKER_WORKSPACE_VOLUME}" >/dev/null 2>&1 || true
     echo "Removed Docker sandbox volumes if present: ${DOCKER_DATA_VOLUME}, ${DOCKER_WORKSPACE_VOLUME}"
+    exit 0
     ;;
   status)
     if container_exists; then
@@ -140,6 +184,7 @@ case "${ACTION}" in
     else
       echo "Docker sandbox does not exist: ${DOCKER_NAME}"
     fi
+    exit 0
     ;;
 esac
 
@@ -163,6 +208,7 @@ do_update() {
   if container_exists; then
     echo "Stopping ${DOCKER_NAME}..."
     docker stop "${DOCKER_NAME}" > /dev/null 2>&1 || true
+    clean_gateway_locks
     docker rm   "${DOCKER_NAME}" > /dev/null 2>&1 || true
   fi
 

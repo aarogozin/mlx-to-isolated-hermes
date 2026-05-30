@@ -14,7 +14,7 @@ fi
 
 ACTION="${1:-cloudflare-status}"
 AGENT_RUNTIME="${AGENT_RUNTIME:-hermes}"
-SANDBOX_BACKEND="${SANDBOX_BACKEND:-multipass}"
+SANDBOX_BACKEND="${SANDBOX_BACKEND:-docker}"
 CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-}"
 HERMES_DASHBOARD_PORT="${HERMES_DASHBOARD_PORT:-9119}"
 DOCKER_DASHBOARD_PORT="${DOCKER_DASHBOARD_PORT:-9120}"
@@ -31,10 +31,9 @@ require_command() {
 }
 
 local_dashboard_target() {
-  case "${AGENT_RUNTIME}:${SANDBOX_BACKEND}" in
-    openclaw:*) printf 'http://127.0.0.1:%s\n' "${OPENCLAW_CONTROL_PORT}" ;;
-    hermes:docker) printf 'http://127.0.0.1:%s\n' "${DOCKER_DASHBOARD_PORT}" ;;
-    *) printf 'http://127.0.0.1:%s\n' "${HERMES_DASHBOARD_PORT}" ;;
+  case "${AGENT_RUNTIME}" in
+    openclaw) printf 'http://127.0.0.1:%s\n' "${OPENCLAW_CONTROL_PORT}" ;;
+    hermes) printf 'http://127.0.0.1:%s\n' "${DOCKER_DASHBOARD_PORT}" ;;
   esac
 }
 

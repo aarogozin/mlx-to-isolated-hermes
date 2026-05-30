@@ -111,19 +111,67 @@ def file_sha256(path: Path) -> str:
 
 
 def chunk_text(text: str, target_words: int | None = None, overlap_words: int | None = None) -> list[str]:
-    target = target_words or env_int("RAG_CHUNK_TOKENS", 800)
-    overlap = overlap_words or env_int("RAG_CHUNK_OVERLAP_TOKENS", 120)
-    words = text.split()
-    if not words:
-        return []
-    if len(words) <= target:
-        return [" ".join(words)]
+    target = target_words or env_int("RAG_CHUNK_TOKENS", 400)
+    overlap = overlap_words or env_int("RAG_CHUNK_OVERLAP_TOKENS", 50)
+    paragraphs = text.split("\n\n")
     chunks: list[str] = []
-    step = max(target - overlap, 1)
-    for start in range(0, len(words), step):
-        piece = words[start : start + target]
-        if piece:
-            chunks.append(" ".join(piece))
+    current_chunk: list[str] = []
+    current_words = 0
+    
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        para_words = para.split()
+        if not para_words:
+            continue
+            
+        if current_words + len(para_words) <= target:
+            current_chunk.append(para)
+            current_words += len(para_words)
+        else:
+            if len(para_words) > target:
+                if current_chunk:
+                    chunks.append("\n\n".join(current_chunk))
+                    current_chunk = []
+                    current_words = 0
+                
+                sentences = para.split(". ")
+                for sent in sentences:
+                    sent = sent.strip()
+                    if not sent:
+                        continue
+                    sent_words = sent.split()
+                    if not sent_words:
+                        continue
+                    
+                    if current_words + len(sent_words) <= target:
+                        current_chunk.append(sent)
+                        current_words += len(sent_words)
+                    else:
+                        if current_chunk:
+                            chunks.append(". ".join(current_chunk) + ".")
+                        current_chunk = [sent]
+                        current_words = len(sent_words)
+            else:
+                if current_chunk:
+                    chunks.append("\n\n".join(current_chunk))
+                overlap_text = ""
+                if current_chunk:
+                    last_para_words = current_chunk[-1].split()
+                    overlap_text = " ".join(last_para_words[-overlap:]) if len(last_para_words) >= overlap else current_chunk[-1]
+                
+                current_chunk = []
+                current_words = 0
+                if overlap_text:
+                    current_chunk.append(overlap_text)
+                    current_words = len(overlap_text.split())
+                current_chunk.append(para)
+                current_words += len(para_words)
+                
+    if current_chunk:
+        chunks.append("\n\n".join(current_chunk))
+        
     return chunks
 
 

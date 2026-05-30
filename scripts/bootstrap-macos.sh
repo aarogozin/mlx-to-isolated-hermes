@@ -240,11 +240,7 @@ install_apps_and_runtimes() {
 
   brew_install_cask_if_app_missing lm-studio "/Applications/LM Studio.app"
   brew_install_cask_if_app_missing docker-desktop "/Applications/Docker.app"
-  brew_install_cask_or_manual_admin multipass "/Applications/Multipass.app" "Install Multipass with an admin prompt from a normal terminal:
-  brew install --cask multipass
 
-Or download Canonical Multipass for macOS from:
-  https://multipass.run/install"
 
   ensure_tap jundot/omlx https://github.com/jundot/omlx
 
@@ -358,7 +354,7 @@ configure_project_env() {
 
   set_env_value MODEL_BACKEND "omlx"
   set_env_value AGENT_RUNTIME "hermes"
-  set_env_value SANDBOX_BACKEND "multipass"
+  set_env_value SANDBOX_BACKEND "docker"
   set_env_value MODEL_DIR "${model_dir}"
   set_env_value OLLAMA_MODELS "${HOME}/.ollama/models"
   set_env_value MODEL_CLEAN_MIN_AGE_HOURS "1"
@@ -410,11 +406,11 @@ configure_project_env() {
   [[ -n "$(env_value RAG_TEI_IMAGE)" ]] || set_env_value RAG_TEI_IMAGE "ghcr.io/huggingface/text-embeddings-inference:cpu-latest"
   [[ -n "$(env_value RAG_TIKA_IMAGE)" ]] || set_env_value RAG_TIKA_IMAGE "apache/tika:latest-full"
   [[ -n "$(env_value RAG_DOCLING_IMAGE)" ]] || set_env_value RAG_DOCLING_IMAGE "quay.io/docling-project/docling-serve:latest"
-  [[ -n "$(env_value RAG_DOCKER_EMBEDDING_BACKEND)" ]] || set_env_value RAG_DOCKER_EMBEDDING_BACKEND "hash"
+  [[ -n "$(env_value RAG_DOCKER_EMBEDDING_BACKEND)" ]] || set_env_value RAG_DOCKER_EMBEDDING_BACKEND "tei"
   [[ -n "$(env_value RAG_DOCKER_START_TIMEOUT_SECONDS)" ]] || set_env_value RAG_DOCKER_START_TIMEOUT_SECONDS "600"
   [[ -n "$(env_value INSTALL_RAG_HOST)" ]] || set_env_value INSTALL_RAG_HOST "0"
   [[ -n "$(env_value RAG_AUTO_INDEX_ON_START)" ]] || set_env_value RAG_AUTO_INDEX_ON_START "1"
-  [[ -n "$(env_value MATRIX_MODES)" ]] || set_env_value MATRIX_MODES "hermes/docker hermes/multipass openclaw/docker openclaw/multipass"
+  [[ -n "$(env_value MATRIX_MODES)" ]] || set_env_value MATRIX_MODES "hermes/docker openclaw/docker"
   [[ -n "$(env_value MATRIX_RAG_QUERY)" ]] || set_env_value MATRIX_RAG_QUERY "OpenClaw"
   [[ -n "$(env_value MATRIX_CHAT_TIMEOUT_SECONDS)" ]] || set_env_value MATRIX_CHAT_TIMEOUT_SECONDS "180"
   [[ -n "$(env_value MATRIX_CLEAN_MODE)" ]] || set_env_value MATRIX_CLEAN_MODE "once"
@@ -425,19 +421,7 @@ configure_project_env() {
   set_env_value MODEL_BIND_HOST "0.0.0.0"
   set_env_value OPENAI_BASE_URL "http://localhost:8000/v1"
   set_env_value ANTHROPIC_BASE_URL "http://localhost:8000"
-  set_env_value VM_NAME "omlx-agent-ubuntu"
-  set_env_value HERMES_VM_NAME "omlx-agent-ubuntu"
-  set_env_value OPENCLAW_VM_NAME "omlx-openclaw-ubuntu"
-  set_env_value VM_CPUS "4"
-  set_env_value VM_MEMORY_MB "8192"
-  set_env_value VM_MEMORY "8G"
-  set_env_value VM_DISK_GB "80"
-  set_env_value VM_DISK "80G"
-  set_env_value VM_SSH_USER "agent"
-  set_env_value VM_SSH_KEY "${HOME}/.ssh/omlx_agent_vm_ed25519"
-  set_env_value USER_SSH_PUBLIC_KEY "${HOME}/.ssh/id_ed25519.pub"
-  set_env_value VM_SNAPSHOT_NAME "clean-agent-base"
-  set_env_value UBUNTU_MULTIPASS_IMAGE "24.04"
+
   set_env_value DOCKER_NAME "omlx-agent-docker"
   set_env_value HERMES_IMAGE "nousresearch/hermes-agent:latest"
   set_env_value DOCKER_DATA_VOLUME "omlx-agent-docker-data"
