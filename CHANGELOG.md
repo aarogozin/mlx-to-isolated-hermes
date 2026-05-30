@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.4 — 2026-05-30
+
+Dynamic command hints and Hermes WebSocket loopback gate fixes:
+
+- **Dynamic Command Hints**: Updated `setup.sh` to print `omlx-agent` CLI command suggestions instead of developer `make` targets when executed under the Go wrapper (using the `OMLX_CLI` environment variable).
+- **Hermes Dashboard Chat Fix**: Added a patch for WebSocket token comparisons inside the Hermes container in both `dashboard-control.sh` and `telegram-control.sh`, bypassing token verification under localhost/insecure connections to restore the Chat component on the dashboard.
+
 ## 0.5.3 — 2026-05-30
 
 Global distribution packaging, configuration isolation, and OpenClaw privilege updates:

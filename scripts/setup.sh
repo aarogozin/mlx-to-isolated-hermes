@@ -980,21 +980,35 @@ DONE
     fi
   else
     printf "  ${DIM}   Telegram not configured. Add TELEGRAM_BOT_TOKEN to .env and run:${RESET}\n"
-    printf "  ${DIM}   ${BOLD}make agent-start${RESET}\n"
+    if [[ -n "${OMLX_CLI:-}" ]]; then
+      printf "  ${DIM}   ${BOLD}omlx-agent start${RESET}\n"
+    else
+      printf "  ${DIM}   ${BOLD}make agent-start${RESET}\n"
+    fi
   fi
 
   printf "\n"
 
   # ── Quick commands ──
   printf "  ${BOLD}Useful commands:${RESET}\n"
-  printf "  ${DIM}  make agent-open-dashboard ${RESET}# open Dashboard in browser\n"
-  printf "  ${DIM}  make doctor               ${RESET}# full system health check\n"
-  printf "  ${DIM}  make model-select         ${RESET}# switch local model\n"
-  printf "  ${DIM}  make rag-search QUERY=\"...\" ${RESET}# query local RAG\n"
-  printf "  ${DIM}  make rag-index-status     ${RESET}# show indexing progress\n"
-  printf "  ${DIM}  make rag-status           ${RESET}# RAG service status\n"
+  if [[ -n "${OMLX_CLI:-}" ]]; then
+    printf "  ${DIM}  omlx-agent open-dashboard ${RESET}# open Dashboard/Control UI in browser\n"
+    printf "  ${DIM}  omlx-agent doctor         ${RESET}# full system health check\n"
+    printf "  ${DIM}  omlx-agent model-select   ${RESET}# switch local model\n"
+    printf "  ${DIM}  omlx-agent rag-search \"...\" ${RESET}# query local RAG\n"
+    printf "  ${DIM}  omlx-agent rag-status     ${RESET}# RAG service status\n"
+    printf "  ${DIM}  omlx-agent shell          ${RESET}# shell into the Docker agent\n"
+    [[ -n "${tg_token}" ]] && printf "  ${DIM}  omlx-agent status         ${RESET}# check gateway status\n"
+  else
+    printf "  ${DIM}  make agent-open-dashboard ${RESET}# open Dashboard in browser\n"
+    printf "  ${DIM}  make doctor               ${RESET}# full system health check\n"
+    printf "  ${DIM}  make model-select         ${RESET}# switch local model\n"
+    printf "  ${DIM}  make rag-search QUERY=\"...\" ${RESET}# query local RAG\n"
+    printf "  ${DIM}  make rag-index-status     ${RESET}# show indexing progress\n"
+    printf "  ${DIM}  make rag-status           ${RESET}# RAG service status\n"
     printf "  ${DIM}  make agent-shell          ${RESET}# shell into the Docker agent\n"
-  [[ -n "${tg_token}" ]] && printf "  ${DIM}  make agent-status         ${RESET}# check gateway status\n"
+    [[ -n "${tg_token}" ]] && printf "  ${DIM}  make agent-status         ${RESET}# check gateway status\n"
+  fi
   printf "\n"
 
   # ── Auto-open dashboard in browser ──
@@ -1007,7 +1021,11 @@ DONE
     printf "\n"
     printf "  ${BOLD}RAG indexing status:${RESET}\n"
     "${SCRIPT_DIR}/rag-control.sh" index-status 2>/dev/null | sed 's/^/  /' || true
-    printf "  ${DIM}  Run 'make rag-index-status' any time to refresh.${RESET}\n"
+    if [[ -n "${OMLX_CLI:-}" ]]; then
+      printf "  ${DIM}  Run 'omlx-agent status' any time to refresh RAG / stack status.${RESET}\n"
+    else
+      printf "  ${DIM}  Run 'make rag-index-status' any time to refresh.${RESET}\n"
+    fi
   fi
 }
 

@@ -193,7 +193,7 @@ func main() {
 	cmd.Stderr = os.Stderr
 
 	// Set environment variables, overriding OMLX_HOME
-	cmd.Env = append(os.Environ(), "OMLX_HOME="+omlxHome)
+	cmd.Env = append(os.Environ(), "OMLX_HOME="+omlxHome, "OMLX_CLI=1")
 
 	err = cmd.Run()
 	if err != nil {
