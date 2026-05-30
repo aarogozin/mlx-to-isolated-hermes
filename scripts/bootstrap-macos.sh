@@ -403,7 +403,7 @@ configure_project_env() {
   [[ -n "$(env_value RAG_DOCKER_INDEX_PATH)" ]] || set_env_value RAG_DOCKER_INDEX_PATH ".runtime/rag-docker"
   [[ -n "$(env_value RAG_API_IMAGE)" ]] || set_env_value RAG_API_IMAGE "python:3.12-slim"
   [[ -n "$(env_value RAG_QDRANT_IMAGE)" ]] || set_env_value RAG_QDRANT_IMAGE "qdrant/qdrant:latest"
-  [[ -n "$(env_value RAG_TEI_IMAGE)" ]] || set_env_value RAG_TEI_IMAGE "ghcr.io/huggingface/text-embeddings-inference:cpu-latest"
+  [[ -n "$(env_value RAG_TEI_IMAGE)" ]] || set_env_value RAG_TEI_IMAGE "ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-latest"
   [[ -n "$(env_value RAG_TIKA_IMAGE)" ]] || set_env_value RAG_TIKA_IMAGE "apache/tika:latest-full"
   [[ -n "$(env_value RAG_DOCLING_IMAGE)" ]] || set_env_value RAG_DOCLING_IMAGE "quay.io/docling-project/docling-serve:latest"
   [[ -n "$(env_value RAG_DOCKER_EMBEDDING_BACKEND)" ]] || set_env_value RAG_DOCKER_EMBEDDING_BACKEND "tei"

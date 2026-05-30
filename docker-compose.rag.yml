@@ -67,7 +67,7 @@ services:
       - rag-qdrant:/qdrant/storage
 
   tei:
-    image: ${RAG_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-latest}
+    image: ${RAG_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-latest}
     container_name: ${RAG_TEI_NAME:-mlx-isolated-rag-tei}
     profiles: ["tei"]
     restart: unless-stopped

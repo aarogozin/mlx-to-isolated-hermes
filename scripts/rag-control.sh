@@ -87,7 +87,22 @@ RAG_DOCKER_NAME="${RAG_DOCKER_NAME:-mlx-isolated-rag}"
 RAG_API_IMAGE="${RAG_API_IMAGE:-python:3.12-slim}"
 RAG_DOCKER_EMBEDDING_BACKEND="${RAG_DOCKER_EMBEDDING_BACKEND:-tei}"
 RAG_QDRANT_IMAGE="${RAG_QDRANT_IMAGE:-qdrant/qdrant:latest}"
-RAG_TEI_IMAGE="${RAG_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-latest}"
+
+if [[ "$(uname -m)" == "arm64" || "$(uname -m)" == "aarch64" ]]; then
+  DEFAULT_TEI_IMAGE="ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-latest"
+else
+  DEFAULT_TEI_IMAGE="ghcr.io/huggingface/text-embeddings-inference:cpu-latest"
+fi
+RAG_TEI_IMAGE="${RAG_TEI_IMAGE:-${DEFAULT_TEI_IMAGE}}"
+
+# Automatically translate cpu-latest to cpu-arm64-latest on arm64 hosts to prevent download failures.
+if [[ "$(uname -m)" == "arm64" || "$(uname -m)" == "aarch64" ]]; then
+  if [[ "${RAG_TEI_IMAGE}" == *"cpu-latest" ]]; then
+    echo "Notice: Translating TEI CPU image to arm64 version for Apple Silicon / ARM host."
+    RAG_TEI_IMAGE="${RAG_TEI_IMAGE/cpu-latest/cpu-arm64-latest}"
+  fi
+fi
+
 RAG_TIKA_IMAGE="${RAG_TIKA_IMAGE:-apache/tika:latest-full}"
 RAG_DOCLING_IMAGE="${RAG_DOCLING_IMAGE:-quay.io/docling-project/docling-serve:latest}"
 RAG_REQUIRE_IMAGE_PREFLIGHT="${RAG_REQUIRE_IMAGE_PREFLIGHT:-1}"
