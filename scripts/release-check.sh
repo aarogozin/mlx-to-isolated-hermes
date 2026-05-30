@@ -15,6 +15,7 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 SANDBOX_BACKEND="${SANDBOX_BACKEND:-docker}"
+AGENT_RUNTIME="${AGENT_RUNTIME:-hermes}"
 
 log() {
   printf '\n==> %s\n' "$*"
