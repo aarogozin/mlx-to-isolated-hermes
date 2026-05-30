@@ -181,6 +181,85 @@ run_bootstrap_if_needed() {
   HAVE_BREW=1; HAVE_OMLX=1
 }
 
+FORCE_RESTART_RAG=1
+
+preflight_agent_state() {
+  step "Checking for active agent stacks"
+
+  local -a active_records=()
+  local record
+  while IFS= read -r record; do
+    [[ -n "${record}" ]] || continue
+    active_records+=("${record}")
+  done < <("${SCRIPT_DIR}/agent-control.sh" active 2>/dev/null || true)
+
+  if [[ "${#active_records[@]}" -gt 0 ]]; then
+    printf "  ${DIM}Detected running agent stack(s):${RESET}\n"
+    for r in "${active_records[@]}"; do
+      printf "    ${CYAN}- %s${RESET}\n" "$(agent_mode_label "${r}")"
+    done
+    
+    local idx
+    idx="$(choose_menu "An agent stack is currently running. What would you like to do?" \
+      "Stop the currently running agent (recommended)" \
+      "Leave it running and continue setup" \
+      "Abort setup")"
+    case "${idx}" in
+      0)
+        substep "Stopping running agent stack(s)..."
+        for r in "${active_records[@]}"; do
+          local mode="${r%%|*}"
+          local runtime="${mode%%/*}"
+          local backend="${mode#*/}"
+          AGENT_RUNTIME="${runtime}" SANDBOX_BACKEND="${backend}" "${SCRIPT_DIR}/agent-control.sh" stop >/dev/null 2>&1 || true
+        done
+        ok "Running agent stack(s) stopped"
+        ;;
+      1)
+        warn "Continuing setup with active agents. This may cause port conflicts."
+        ;;
+      2)
+        abort_setup "Setup aborted by user."
+        ;;
+    esac
+  else
+    ok "No active agent stack detected"
+  fi
+
+  # Ask if they want to restart/rebuild the RAG stack
+  if [[ -x "${SCRIPT_DIR}/rag-control.sh" ]]; then
+    local rag_status
+    rag_status="$(RAG_ENABLED=1 "${SCRIPT_DIR}/rag-control.sh" status 2>/dev/null || true)"
+    if [[ "${rag_status}" == *"rag=running"* ]]; then
+      printf "\n"
+      local rag_choice
+      rag_choice="$(choose_menu "RAG stack is currently running. What would you like to do?" \
+        "Keep the current RAG stack running (reuse)" \
+        "Restart/rebuild the RAG stack" \
+        "Stop RAG stack and continue setup without it")"
+      case "${rag_choice}" in
+        0)
+          FORCE_RESTART_RAG=0
+          ok "Will reuse running RAG stack"
+          ;;
+        1)
+          FORCE_RESTART_RAG=1
+          substep "RAG stack will be restarted during deployment"
+          ;;
+        2)
+          FORCE_RESTART_RAG=0
+          RAG_SELECTED=0
+          substep "Stopping RAG stack..."
+          RAG_ENABLED=1 "${SCRIPT_DIR}/rag-control.sh" stop >/dev/null 2>&1 || true
+          ok "RAG stack stopped"
+          ;;
+      esac
+    else
+      FORCE_RESTART_RAG=1
+    fi
+  fi
+}
+
 # ── Step 3: Choose agent runtime ─────────────────────────────────────────────
 AGENT_RUNTIME=""
 BACKEND="docker"          # Docker is the only supported backend
@@ -616,17 +695,21 @@ configure_rag() {
   [[ -n "$(env_get RAG_WATCH_INTERVAL_SECONDS)" ]] || env_put RAG_WATCH_INTERVAL_SECONDS "20"
   [[ -n "$(env_get RAG_WATCH_DEBOUNCE_SECONDS)" ]] || env_put RAG_WATCH_DEBOUNCE_SECONDS "3"
 
-  substep "Installing RAG dependencies..."
-  "${SCRIPT_DIR}/rag-control.sh" install
+  if [[ "${FORCE_RESTART_RAG:-1}" -eq 1 ]]; then
+    substep "Installing RAG dependencies..."
+    "${SCRIPT_DIR}/rag-control.sh" install
 
-  substep "Starting RAG containers (Qdrant, Tika, Docling, API)..."
-  "${SCRIPT_DIR}/rag-control.sh" start
+    substep "Starting RAG containers (Qdrant, Tika, Docling, API)..."
+    "${SCRIPT_DIR}/rag-control.sh" start
 
-  substep "Starting background indexing..."
-  local log_file=".runtime/rag-docker/rag-index.log"
-  mkdir -p "$(dirname "${log_file}")"
-  nohup "${SCRIPT_DIR}/rag-control.sh" index > "${log_file}" 2>&1 &
-  info "Indexing in background — check progress: make rag-index-status"
+    substep "Starting background indexing..."
+    local log_file=".runtime/rag-docker/rag-index.log"
+    mkdir -p "$(dirname "${log_file}")"
+    nohup "${SCRIPT_DIR}/rag-control.sh" index > "${log_file}" 2>&1 &
+    info "Indexing in background — check progress: make rag-index-status"
+  else
+    ok "Reusing already running RAG stack"
+  fi
 
   substep "Verifying RAG API is reachable..."
   local attempts=5 i api_online=0
@@ -873,6 +956,7 @@ main() {
   PREVIOUS_SANDBOX_BACKEND="$(env_get SANDBOX_BACKEND)"
   detect_state
   run_bootstrap_if_needed
+  preflight_agent_state
   choose_runtime          # Step 3: Hermes or OpenClaw — always Docker
   preflight_active_agent  # Step 4: conflict detection
   preflight_port_conflicts # Step 4b: check for port conflicts on host
