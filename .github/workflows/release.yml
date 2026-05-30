@@ -99,24 +99,24 @@ jobs:
           mkdir -p Formula
 
           # Write the new Formula content
-          cat <<EOF > Formula/omlx-agent.rb
-class OmlxAgent < Formula
-  desc "MLX Isolated Agent Stack CLI"
-  homepage "https://github.com/aarogozin/mlx-to-isolated-hermes"
-  version "${VERSION}"
-  url "https://github.com/aarogozin/mlx-to-isolated-hermes/releases/download/v${VERSION}/omlx-agent-v${VERSION}-darwin-arm64.tar.gz"
-  sha256 "${SHA256}"
-  license "MIT"
+          cat <<'EOF' | sed 's/^          //' > Formula/omlx-agent.rb
+          class OmlxAgent < Formula
+            desc "MLX Isolated Agent Stack CLI"
+            homepage "https://github.com/aarogozin/mlx-to-isolated-hermes"
+            version "${VERSION}"
+            url "https://github.com/aarogozin/mlx-to-isolated-hermes/releases/download/v${VERSION}/omlx-agent-v${VERSION}-darwin-arm64.tar.gz"
+            sha256 "${SHA256}"
+            license "MIT"
 
-  def install
-    bin.install "omlx-agent"
-  end
+            def install
+              bin.install "omlx-agent"
+            end
 
-  test do
-    assert_match "MLX Isolated Agent Stack", shell_output("#{bin}/omlx-agent")
-  end
-end
-EOF
+            test do
+              assert_match "MLX Isolated Agent Stack", shell_output("#{bin}/omlx-agent")
+            end
+          end
+          EOF
 
           # Commit and push
           git add Formula/omlx-agent.rb
