@@ -267,6 +267,7 @@ fi
   -e HERMES_DASHBOARD_TUI="${HERMES_DASHBOARD_TUI:-0}" \
   -e HERMES_DASHBOARD_INSECURE="${HERMES_DASHBOARD_INSECURE}" \
   -e HERMES_YOLO_MODE="${HERMES_YOLO_MODE:-}" \
+  -e PLAYWRIGHT_BROWSERS_PATH=/opt/data/.playwright \
   -e PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   "${mount_args[@]}" \
   "${DOCKER_IMAGE}" \

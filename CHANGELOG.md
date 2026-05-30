@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.7 — 2026-05-30
+
+Persistent Playwright browser installation path:
+
+- **Persistent Playwright Path**: Configured `PLAYWRIGHT_BROWSERS_PATH=/opt/data/.playwright` inside the container in `docker-create.sh`, ensuring downloaded browser binaries survive container updates and recreations.
+
 ## 0.5.6 — 2026-05-30
 
 Integrated HERMES_YOLO_MODE support:
