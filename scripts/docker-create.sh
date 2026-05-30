@@ -241,30 +241,9 @@ desired_dashboard_port="127.0.0.1:${DOCKER_DASHBOARD_PORT}"
 desired_gateway_port="127.0.0.1:${DOCKER_GATEWAY_API_PORT}"
 
 if docker container inspect "${DOCKER_NAME}" >/dev/null 2>&1; then
-  current_image_id="$(docker inspect -f '{{.Image}}' "${DOCKER_NAME}")"
-  desired_image_id="$(docker image inspect -f '{{.Id}}' "${DOCKER_IMAGE}")"
-  current_dashboard_port="$(docker inspect -f '{{range $port, $bindings := .NetworkSettings.Ports}}{{if eq $port "9119/tcp"}}{{range $bindings}}{{.HostIp}}:{{.HostPort}}{{end}}{{end}}{{end}}' "${DOCKER_NAME}")"
-  current_gateway_port="$(docker inspect -f '{{range $port, $bindings := .NetworkSettings.Ports}}{{if eq $port "8642/tcp"}}{{range $bindings}}{{.HostIp}}:{{.HostPort}}{{end}}{{end}}{{end}}' "${DOCKER_NAME}")"
-  current_command="$(docker inspect -f '{{join .Config.Cmd " "}}' "${DOCKER_NAME}")"
-  current_extra_hosts="$(docker inspect -f '{{range .HostConfig.ExtraHosts}}{{println .}}{{end}}' "${DOCKER_NAME}")"
-  current_insecure="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${DOCKER_NAME}" | grep '^HERMES_DASHBOARD_INSECURE=' | cut -d= -f2 || true)"
-  current_tui="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${DOCKER_NAME}" | grep '^HERMES_DASHBOARD_TUI=' | cut -d= -f2 || true)"
-  if [[ "${current_image_id}" == "${desired_image_id}" \
-    && "${current_dashboard_port}" == "${desired_dashboard_port}" \
-    && "${current_gateway_port}" == "${desired_gateway_port}" \
-    && "${current_command}" == "${desired_command}" \
-    && "${current_insecure}" == "${HERMES_DASHBOARD_INSECURE}" \
-    && "${current_tui}" == "${HERMES_DASHBOARD_TUI}" \
-    && "${current_extra_hosts}" == *"rag-host.internal:host-gateway"* ]]; then
-    echo "Docker container already exists: ${DOCKER_NAME}"
-    echo "Image: ${DOCKER_IMAGE}"
-    echo "Dashboard: http://127.0.0.1:${DOCKER_DASHBOARD_PORT}"
-    exit 0
-  fi
-
-  echo "Recreating Docker container ${DOCKER_NAME} because image, command, environment, or ports changed."
+  echo "Stopping and removing existing Hermes Docker container: ${DOCKER_NAME}"
   docker stop "${DOCKER_NAME}" >/dev/null 2>&1 || true
-  docker rm "${DOCKER_NAME}" >/dev/null
+  docker rm "${DOCKER_NAME}" >/dev/null 2>&1 || true
 fi
 
   docker create \

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.2 — 2026-05-30
+
+Pure Docker transition, RAG optimizations, and setup wizard hardening:
+
+- **Robust Port & Process Resolution**: Fixed the macOS `lsof` newline parsing bug for IPv4/IPv6 port bindings. Implemented automatic Docker container stopping and host process termination when target ports are occupied.
+- **macOS launchd Integration**: Integrated automatic detection, unloading, and disabling of launchd-managed host processes (e.g. host-level openclaw gateway) during setup conflict resolution to prevent automatic process restart loops.
+- **Docker Auto-Recreation**: Configured Docker creation scripts to *always* stop and remove existing containers on start/create. This guarantees that `.env` updates, ports, and mounts are always freshly applied and resolves stale exited/created container states.
+- **RAG Settings & Splitter Optimization**: Standardized default chunk token size to 400 and overlap to 50. Enabled `tei` semantic embeddings as the default backend. Optimized RAG text splitting in `rag-container-api.py` to divide text semantically by paragraph and sentence boundaries.
+- **ARM64 TEI Pulling Fix**: Configured the RAG controller to dynamically map `cpu-latest` to `cpu-arm64-latest` for TEI on Apple Silicon arm64 hosts, avoiding image pull errors from outdated `.env` settings.
+- **Pure Docker Purge**: Removed all legacy Multipass VM control scripts, Makefile targets, and VM smoke checks in CI.
+
 ## 0.5.1 — 2026-05-29
 
 Hotfix for Hermes Docker Dashboard Chat:

@@ -183,6 +183,23 @@ run_bootstrap_if_needed() {
 
 FORCE_RESTART_RAG=1
 
+get_agent_records() {
+  if command -v docker >/dev/null 2>&1; then
+    local hermes_name="${DOCKER_NAME:-omlx-agent-docker}"
+    if docker container inspect "${hermes_name}" >/dev/null 2>&1; then
+      local status
+      status="$(docker inspect -f '{{.State.Status}}' "${hermes_name}" 2>/dev/null || echo "unknown")"
+      echo "hermes|${hermes_name}|${status}"
+    fi
+    local openclaw_name="${OPENCLAW_DOCKER_NAME:-omlx-agent-openclaw-docker}"
+    if docker container inspect "${openclaw_name}" >/dev/null 2>&1; then
+      local status
+      status="$(docker inspect -f '{{.State.Status}}' "${openclaw_name}" 2>/dev/null || echo "unknown")"
+      echo "openclaw|${openclaw_name}|${status}"
+    fi
+  fi
+}
+
 preflight_agent_state() {
   step "Checking for active agent stacks"
 
@@ -191,32 +208,35 @@ preflight_agent_state() {
   while IFS= read -r record; do
     [[ -n "${record}" ]] || continue
     active_records+=("${record}")
-  done < <("${SCRIPT_DIR}/agent-control.sh" active 2>/dev/null || true)
+  done < <(get_agent_records)
 
   if [[ "${#active_records[@]}" -gt 0 ]]; then
-    printf "  ${DIM}Detected running agent stack(s):${RESET}\n"
+    printf "  ${DIM}Detected existing agent stack(s):${RESET}\n"
     for r in "${active_records[@]}"; do
-      printf "    ${CYAN}- %s${RESET}\n" "$(agent_mode_label "${r}")"
+      local runtime="${r%%|*}"
+      local name="$(printf '%s\n' "${r}" | cut -d'|' -f2)"
+      local status="$(printf '%s\n' "${r}" | cut -d'|' -f3)"
+      printf "    ${CYAN}- %s (status: %s)${RESET}\n" "${runtime} [Docker: ${name}]" "${status}"
     done
     
     local idx
-    idx="$(choose_menu "An agent stack is currently running. What would you like to do?" \
-      "Stop the currently running agent (recommended)" \
-      "Leave it running and continue setup" \
+    idx="$(choose_menu "An agent stack currently exists in Docker. What would you like to do?" \
+      "Stop and remove existing agent stack(s) (recommended)" \
+      "Leave them as is and continue setup" \
       "Abort setup")"
     case "${idx}" in
       0)
-        substep "Stopping running agent stack(s)..."
+        substep "Stopping and removing agent stack(s)..."
         for r in "${active_records[@]}"; do
-          local mode="${r%%|*}"
-          local runtime="${mode%%/*}"
-          local backend="${mode#*/}"
-          AGENT_RUNTIME="${runtime}" SANDBOX_BACKEND="${backend}" "${SCRIPT_DIR}/agent-control.sh" stop >/dev/null 2>&1 || true
+          local runtime="${r%%|*}"
+          local name="$(printf '%s\n' "${r}" | cut -d'|' -f2)"
+          AGENT_RUNTIME="${runtime}" SANDBOX_BACKEND="docker" "${SCRIPT_DIR}/agent-control.sh" stop >/dev/null 2>&1 || true
+          docker rm -f "${name}" >/dev/null 2>&1 || true
         done
-        ok "Running agent stack(s) stopped"
+        ok "Agent stack(s) stopped and removed"
         ;;
       1)
-        warn "Continuing setup with active agents. This may cause port conflicts."
+        warn "Continuing setup with existing agent stacks."
         ;;
       2)
         abort_setup "Setup aborted by user."
@@ -342,7 +362,7 @@ preflight_active_agent() {
   while IFS= read -r record; do
     [[ -n "${record}" ]] || continue
     active_records+=("${record}")
-  done < <("${SCRIPT_DIR}/agent-control.sh" active || true)
+  done < <(get_agent_records)
 
   if [[ "${#active_records[@]}" -eq 0 ]]; then
     ok "No active agent stack detected"
@@ -352,11 +372,12 @@ preflight_active_agent() {
   printf "  ${DIM}Detected active agent stack(s):${RESET}\n"
   local same_active=0
   local other_active=0
-  local mode
   for record in "${active_records[@]}"; do
-    mode="${record%%|*}"
-    printf "    ${CYAN}- %s${RESET}\n" "$(agent_mode_label "${record}")"
-    if [[ "${mode}" == "${requested_mode}" ]]; then
+    local runtime="${record%%|*}"
+    local name="$(printf '%s\n' "${record}" | cut -d'|' -f2)"
+    local status="$(printf '%s\n' "${record}" | cut -d'|' -f3)"
+    printf "    ${CYAN}- %s (status: %s)${RESET}\n" "${runtime} [Docker: ${name}]" "${status}"
+    if [[ "${runtime}" == "${AGENT_RUNTIME}" ]]; then
       same_active=1
     else
       other_active=1
@@ -366,9 +387,9 @@ preflight_active_agent() {
 
   local idx
   if [[ "${other_active}" -eq 0 && "${same_active}" -eq 1 ]]; then
-    idx="$(choose_menu "The requested stack is already running. What should setup do?" \
+    idx="$(choose_menu "The requested stack already exists. What should setup do?" \
       "Reuse it and continue setup" \
-      "Pause/restart it before continuing" \
+      "Stop and remove it to force recreate (recommended)" \
       "Full clean-all reset before continuing" \
       "Abort setup")"
     case "${idx}" in
@@ -377,9 +398,16 @@ preflight_active_agent() {
         ok "Will reuse active stack"
         ;;
       1)
+        local container_name
+        container_name="${DOCKER_NAME:-omlx-agent-docker}"
+        if [[ "${AGENT_RUNTIME}" == "openclaw" ]]; then
+          container_name="${OPENCLAW_DOCKER_NAME:-omlx-agent-openclaw-docker}"
+        fi
         pause_detected_mode "${requested_mode}"
+        substep "Removing container '${container_name}' to force recreation..."
+        docker rm -f "${container_name}" >/dev/null 2>&1 || true
         SETUP_AGENT_CONFLICT_POLICY="prompt"
-        ok "Active stack paused"
+        ok "Active stack stopped and removed"
         ;;
       2)
         FORCE=1 "${SCRIPT_DIR}/clean-all.sh"
@@ -393,20 +421,24 @@ preflight_active_agent() {
     return
   fi
 
-  idx="$(choose_menu "Another stack is active. What should setup do?" \
-    "Pause active stack(s) and continue" \
+  idx="$(choose_menu "Another stack exists. What should setup do?" \
+    "Stop and remove conflicting stack(s) and continue" \
     "Full clean-all reset before continuing" \
     "Continue anyway without stopping anything" \
     "Abort setup")"
   case "${idx}" in
     0)
       for record in "${active_records[@]}"; do
-        mode="${record%%|*}"
-        [[ "${mode}" == "${requested_mode}" ]] && continue
-        pause_detected_mode "${mode}"
+        local runtime="${record%%|*}"
+        local name="$(printf '%s\n' "${record}" | cut -d'|' -f2)"
+        local r_mode="${runtime}/docker"
+        [[ "${runtime}" == "${AGENT_RUNTIME}" ]] && continue
+        pause_detected_mode "${r_mode}"
+        substep "Removing container '${name}'..."
+        docker rm -f "${name}" >/dev/null 2>&1 || true
       done
       SETUP_AGENT_CONFLICT_POLICY="prompt"
-      ok "Conflicting stack(s) paused"
+      ok "Conflicting stack(s) stopped and removed"
       ;;
     1)
       FORCE=1 "${SCRIPT_DIR}/clean-all.sh"
@@ -450,14 +482,17 @@ preflight_port_conflicts() {
   for i in "${!ports[@]}"; do
     local port="${ports[$i]}"
     local label="${labels[$i]}"
-    local pid_info
-    pid_info="$(lsof -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | tail -n +2 || true)"
-    if [[ -n "${pid_info}" ]]; then
+    local lsof_lines
+    lsof_lines="$(lsof -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | tail -n +2 || true)"
+    if [[ -n "${lsof_lines}" ]]; then
       conflict_found=1
+      local first_line
+      first_line="$(printf '%s\n' "${lsof_lines}" | head -n 1)"
       local proc_name
+      proc_name="$(printf '%s\n' "${first_line}" | awk '{print $1}')"
       local pid
-      proc_name="$(echo "${pid_info}" | awk '{print $1}')"
-      pid="$(echo "${pid_info}" | awk '{print $2}')"
+      pid="$(printf '%s\n' "${first_line}" | awk '{print $2}')"
+      
       warn "Port ${port} (${label}) is already in use by process '${proc_name}' (PID: ${pid})."
       
       if [[ "${proc_name}" == "docker-pr"* || "${proc_name}" == "com.docke"* ]]; then
@@ -473,20 +508,51 @@ preflight_port_conflicts() {
   if [[ "${conflict_found}" -eq 1 ]]; then
     local idx
     idx="$(choose_menu "Port conflicts detected. How should setup proceed?" \
-      "Attempt to kill conflicting host processes and continue" \
+      "Attempt to kill conflicting host processes / stop Docker containers and continue" \
       "Ignore and continue anyway (may fail to start)" \
       "Abort setup")"
     case "${idx}" in
       0)
         for port in "${ports[@]}"; do
+          # 1. Stop any docker container mapping this port
+          local container_name
+          container_name="$(docker ps --filter "publish=${port}" --format '{{.Names}}' 2>/dev/null | head -n 1 || true)"
+          if [[ -n "${container_name}" ]]; then
+            substep "Stopping container '${container_name}' occupying port ${port}..."
+            docker stop "${container_name}" >/dev/null 2>&1 || true
+          fi
+
+          # 2. Kill any host process occupying this port
           local pids
-          pids="$(lsof -t -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"
+          pids="$(lsof -t -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | sort -u || true)"
           if [[ -n "${pids}" ]]; then
             for pid in ${pids}; do
               local comm
               comm="$(ps -p "${pid}" -o comm= 2>/dev/null || true)"
-              if [[ "${comm}" != *"docker"* && "${comm}" != *"launchd"* ]]; then
-                substep "Killing process '${comm}' (PID: ${pid}) occupying port ${port}..."
+              local comm_base
+              comm_base="$(basename "${comm}" 2>/dev/null || echo "${comm}")"
+              if [[ "${comm_base}" != *"docker"* && "${comm_base}" != *"launchd"* && -n "${pid}" ]]; then
+                # Check if this process is managed by launchd
+                local label
+                label="$(launchctl list 2>/dev/null | grep -E "(^|[[:space:]])${pid}([[:space:]]|$)" | awk '{print $3}' || true)"
+                if [[ -n "${label}" ]]; then
+                  substep "Stopping launchd service '${label}' (PID: ${pid}) occupying port ${port}..."
+                  local plist_paths=(
+                    "${HOME}/Library/LaunchAgents/${label}.plist"
+                    "/Library/LaunchAgents/${label}.plist"
+                    "/Library/LaunchDaemons/${label}.plist"
+                  )
+                  for plist in "${plist_paths[@]}"; do
+                    if [[ -f "${plist}" ]]; then
+                      launchctl bootout "gui/$(id -u)" "${plist}" >/dev/null 2>&1 || \
+                      launchctl unload "${plist}" >/dev/null 2>&1 || true
+                      mv "${plist}" "${plist}.disabled" >/dev/null 2>&1 || true
+                    fi
+                  done
+                  launchctl remove "${label}" >/dev/null 2>&1 || true
+                fi
+
+                substep "Killing process '${comm_base}' (PID: ${pid}) occupying port ${port}..."
                 kill -9 "${pid}" 2>/dev/null || true
               fi
             done

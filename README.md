@@ -8,7 +8,7 @@ serves them through an OpenAI-compatible API, and an optional RAG service
 indexes your documents. The agent runs in Docker with its data visible on the
 host filesystem.
 
-**Version:** `0.5.1`
+**Version:** `0.5.2`
 
 ---
 
@@ -199,7 +199,7 @@ Key variables:
 
 ```bash
 make ci-check                              # shell syntax + unit tests
-SKIP_VM_E2E=1 SKIP_DOCKER_E2E=1 make release-check
+make release-check
 make matrix-e2e                            # full sandbox matrix (optional)
 ```
 

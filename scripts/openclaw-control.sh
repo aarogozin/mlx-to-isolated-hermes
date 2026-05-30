@@ -286,24 +286,9 @@ docker_create() {
   fi
 
   if docker_container_exists; then
-    current_extra_hosts="$(docker inspect -f '{{range .HostConfig.ExtraHosts}}{{println .}}{{end}}' "${OPENCLAW_DOCKER_NAME}" 2>/dev/null || true)"
-    current_mounts="$(docker inspect -f '{{range .Mounts}}{{println .Destination}}{{end}}' "${OPENCLAW_DOCKER_NAME}" 2>/dev/null || true)"
-    current_ports="$(docker inspect -f '{{json .HostConfig.PortBindings}}' "${OPENCLAW_DOCKER_NAME}" 2>/dev/null || true)"
-    bridge_binding_ok=1
-    if [[ "${OPENCLAW_EXPOSE_BRIDGE_PORT}" == "1" || "${OPENCLAW_EXPOSE_BRIDGE_PORT}" == "true" ]]; then
-      [[ "${current_ports}" == *"\"18790/tcp\""* && "${current_ports}" == *"\"HostPort\":\"${OPENCLAW_BRIDGE_PORT}\""* ]] || bridge_binding_ok=0
-    else
-      [[ "${current_ports}" != *"\"18790/tcp\""* ]] || bridge_binding_ok=0
-    fi
-    if [[ "${current_extra_hosts}" == *"rag-host.internal:host-gateway"* \
-      && "${current_mounts}" == *"/usr/local/bin/rag-search"* \
-      && "${bridge_binding_ok}" == "1" ]]; then
-      echo "OpenClaw Docker container already exists: ${OPENCLAW_DOCKER_NAME}"
-      return 0
-    fi
-    echo "Recreating OpenClaw Docker container ${OPENCLAW_DOCKER_NAME} because RAG networking/tooling or port bindings changed."
+    echo "Stopping and removing existing OpenClaw Docker container: ${OPENCLAW_DOCKER_NAME}"
     docker stop "${OPENCLAW_DOCKER_NAME}" >/dev/null 2>&1 || true
-    docker rm "${OPENCLAW_DOCKER_NAME}" >/dev/null
+    docker rm "${OPENCLAW_DOCKER_NAME}" >/dev/null 2>&1 || true
   fi
 
   docker create \
