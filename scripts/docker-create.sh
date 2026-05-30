@@ -19,6 +19,10 @@ OVERRIDE_OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
 OVERRIDE_OBSIDIAN_GUEST_PATH="${OBSIDIAN_GUEST_PATH:-}"
 OVERRIDE_TELEGRAM_BOT_TOKEN_SET="${TELEGRAM_BOT_TOKEN+x}"
 OVERRIDE_TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+OVERRIDE_BRAVE_API_KEY_SET="${BRAVE_API_KEY+x}"
+OVERRIDE_BRAVE_API_KEY="${BRAVE_API_KEY:-}"
+OVERRIDE_GITHUB_PERSONAL_ACCESS_TOKEN_SET="${GITHUB_PERSONAL_ACCESS_TOKEN+x}"
+OVERRIDE_GITHUB_PERSONAL_ACCESS_TOKEN="${GITHUB_PERSONAL_ACCESS_TOKEN:-}"
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -57,6 +61,16 @@ if [[ -n "${OVERRIDE_TELEGRAM_BOT_TOKEN_SET}" ]]; then
   TELEGRAM_BOT_TOKEN="${OVERRIDE_TELEGRAM_BOT_TOKEN}"
 else
   TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+fi
+if [[ -n "${OVERRIDE_BRAVE_API_KEY_SET}" ]]; then
+  BRAVE_API_KEY="${OVERRIDE_BRAVE_API_KEY}"
+else
+  BRAVE_API_KEY="${BRAVE_API_KEY:-}"
+fi
+if [[ -n "${OVERRIDE_GITHUB_PERSONAL_ACCESS_TOKEN_SET}" ]]; then
+  GITHUB_PERSONAL_ACCESS_TOKEN="${OVERRIDE_GITHUB_PERSONAL_ACCESS_TOKEN}"
+else
+  GITHUB_PERSONAL_ACCESS_TOKEN="${GITHUB_PERSONAL_ACCESS_TOKEN:-}"
 fi
 TELEGRAM_USER_ID="${TELEGRAM_USER_ID:-}"
 TELEGRAM_ALLOWED_USERS="${TELEGRAM_ALLOWED_USERS:-}"
@@ -170,6 +184,8 @@ write_data_volume() {
     -e GATEWAY_ALLOW_ALL_USERS="${GATEWAY_ALLOW_ALL_USERS}" \
     -e RAG_BASE_URL="${RAG_BASE_URL_DOCKER}" \
     -e HERMES_YOLO_MODE="${HERMES_YOLO_MODE:-}" \
+    -e BRAVE_API_KEY="${BRAVE_API_KEY}" \
+    -e GITHUB_PERSONAL_ACCESS_TOKEN="${GITHUB_PERSONAL_ACCESS_TOKEN}" \
     -v "${SCRIPT_DIR}/rag-search-bridge.sh:/tmp/rag-search:ro" \
     -v "${data_mount}" \
     -v "${workspace_mount}" \
@@ -199,23 +215,119 @@ append_env_if_set TELEGRAM_GROUP_ALLOWED_CHATS "${TELEGRAM_GROUP_ALLOWED_CHATS}"
 append_env_if_set GATEWAY_ALLOWED_USERS "${GATEWAY_ALLOWED_USERS}"
 append_env_if_set GATEWAY_ALLOW_ALL_USERS "${GATEWAY_ALLOW_ALL_USERS}"
 append_env_if_set HERMES_YOLO_MODE "${HERMES_YOLO_MODE:-}"
-cat > /opt/data/config.yaml <<EOF
-model:
-  provider: local-omlx
-  default: "${MODEL_NAME}"
-providers:
-  local-omlx:
-    name: Local oMLX
-    base_url: "${OPENAI_BASE_URL}"
-    api_key: "${OPENAI_API_KEY}"
-    default_model: "${MODEL_NAME}"
-    transport: chat_completions
-    discover_models: true
-    models: {}
-terminal:
-  backend: local
-  cwd: "/opt/data/workspace"
-EOF
+append_env_if_set BRAVE_API_KEY "${BRAVE_API_KEY}"
+append_env_if_set GITHUB_PERSONAL_ACCESS_TOKEN "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+/opt/hermes/.venv/bin/python3 -c '\''
+import yaml, sys
+from pathlib import Path
+
+model_name = sys.argv[1]
+base_url = sys.argv[2]
+api_key = sys.argv[3]
+brave_key = sys.argv[4]
+github_token = sys.argv[5]
+
+config_path = Path("/opt/data/config.yaml")
+
+default_mcp_servers = {
+    "brave-search": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+        "env": {"BRAVE_API_KEY": brave_key},
+        "enabled": bool(brave_key)
+    },
+    "github": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": github_token},
+        "enabled": bool(github_token)
+    },
+    "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/opt/data/workspace", "/mnt/obsidian"],
+        "enabled": True
+    },
+    "fetch": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-fetch"],
+        "enabled": True
+    },
+    "git": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-git"],
+        "enabled": True
+    }
+}
+
+new_config = {
+    "model": {
+        "provider": "local-omlx",
+        "default": model_name
+    },
+    "providers": {
+        "local-omlx": {
+            "name": "Local oMLX",
+            "base_url": base_url,
+            "api_key": api_key,
+            "default_model": model_name,
+            "transport": "chat_completions",
+            "discover_models": True,
+            "models": {}
+        }
+    },
+    "terminal": {
+        "backend": "local",
+        "cwd": "/opt/data/workspace"
+    },
+    "mcp_servers": default_mcp_servers
+}
+
+if config_path.exists():
+    try:
+        with open(config_path, "r") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception:
+        data = {}
+    
+    if "model" not in data or not isinstance(data["model"], dict):
+        data["model"] = {}
+    data["model"]["provider"] = "local-omlx"
+    data["model"]["default"] = model_name
+    
+    if "providers" not in data or not isinstance(data["providers"], dict):
+        data["providers"] = {}
+    data["providers"]["local-omlx"] = new_config["providers"]["local-omlx"]
+    
+    if "terminal" not in data or not isinstance(data["terminal"], dict):
+        data["terminal"] = {}
+    if "backend" not in data["terminal"]:
+        data["terminal"]["backend"] = "local"
+    if "cwd" not in data["terminal"]:
+        data["terminal"]["cwd"] = "/opt/data/workspace"
+        
+    if "mcp_servers" not in data or not isinstance(data["mcp_servers"], dict):
+        data["mcp_servers"] = {}
+    
+    for k, v in default_mcp_servers.items():
+        if k not in data["mcp_servers"]:
+            data["mcp_servers"][k] = v
+        else:
+            if k in ("brave-search", "github"):
+                if "env" not in data["mcp_servers"][k] or not isinstance(data["mcp_servers"][k]["env"], dict):
+                    data["mcp_servers"][k]["env"] = {}
+                
+                if k == "brave-search":
+                    data["mcp_servers"][k]["env"]["BRAVE_API_KEY"] = brave_key
+                    data["mcp_servers"][k]["enabled"] = bool(brave_key)
+                elif k == "github":
+                    data["mcp_servers"][k]["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"] = github_token
+                    data["mcp_servers"][k]["enabled"] = bool(github_token)
+else:
+    data = new_config
+
+with open(config_path, "w") as f:
+    yaml.safe_dump(data, f, default_flow_style=False)
+'\'' "${MODEL_NAME}" "${OPENAI_BASE_URL}" "${OPENAI_API_KEY}" "${BRAVE_API_KEY:-}" "${GITHUB_PERSONAL_ACCESS_TOKEN:-}"
 install -m 0755 /tmp/rag-search /opt/data/.local/bin/rag-search
 mkdir -p /opt/data/skills/local-rag
 cat > /opt/data/skills/local-rag/SKILL.md <<'EOF'
@@ -267,7 +379,6 @@ fi
   -e HERMES_DASHBOARD_TUI="${HERMES_DASHBOARD_TUI:-0}" \
   -e HERMES_DASHBOARD_INSECURE="${HERMES_DASHBOARD_INSECURE}" \
   -e HERMES_YOLO_MODE="${HERMES_YOLO_MODE:-}" \
-  -e PLAYWRIGHT_BROWSERS_PATH=/opt/data/.playwright \
   -e PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   "${mount_args[@]}" \
   "${DOCKER_IMAGE}" \
