@@ -71,22 +71,28 @@ jobs:
 
       - name: Update Homebrew Tap
         env:
-          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
         run: |
-          if [[ -z "${TAP_GITHUB_TOKEN}" ]]; then
-            echo "TAP_GITHUB_TOKEN secret is not set. Skipping Homebrew tap update."
+          if [[ -z "${TAP_DEPLOY_KEY}" ]]; then
+            echo "TAP_DEPLOY_KEY secret is not set. Skipping Homebrew tap update."
             exit 0
           fi
 
           VERSION="${{ steps.version.outputs.value }}"
           SHA256="${{ steps.sha256.outputs.value }}"
 
+          # Set up SSH key for push
+          mkdir -p ~/.ssh
+          echo "${TAP_DEPLOY_KEY}" > ~/.ssh/tap_deploy_key
+          chmod 600 ~/.ssh/tap_deploy_key
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_deploy_key -o StrictHostKeyChecking=no"
+
           # Configure git
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Clone the tap repository
-          git clone https://${TAP_GITHUB_TOKEN}@github.com/aarogozin/homebrew-tap.git homebrew-tap
+          # Clone the tap repository using SSH
+          git clone git@github.com:aarogozin/homebrew-tap.git homebrew-tap
           cd homebrew-tap
 
           # Create Formula directory if it doesn't exist
