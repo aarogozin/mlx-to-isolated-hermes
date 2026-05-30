@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ENV_FILE="${PROJECT_ROOT}/.env"
+OMLX_HOME="${OMLX_HOME:-${PROJECT_ROOT}}"
+ENV_FILE="${OMLX_HOME}/.env"
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -12,12 +13,12 @@ if [[ -f "${ENV_FILE}" ]]; then
   set +a
 fi
 
-MODEL_DIR="${MODEL_DIR:-${PROJECT_ROOT}/.runtime/omlx-models}"
+MODEL_DIR="${MODEL_DIR:-${OMLX_HOME}/.runtime/omlx-models}"
 OMLX_PORT="${OMLX_PORT:-8000}"
 MODEL_BIND_HOST="${MODEL_BIND_HOST:-0.0.0.0}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
-LOG_DIR="${PROJECT_ROOT}/.runtime/logs"
-PID_FILE="${PROJECT_ROOT}/.runtime/omlx.pid"
+LOG_DIR="${OMLX_HOME}/.runtime/logs"
+PID_FILE="${OMLX_HOME}/.runtime/omlx.pid"
 LAUNCHD_LABEL="${OMLX_LAUNCHD_LABEL:-com.omlx-to-client.omlx}"
 LAUNCHD_PLIST="${HOME}/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
 BREW_PREFIX="$(brew --prefix 2>/dev/null || printf '/opt/homebrew')"
@@ -38,7 +39,7 @@ if [[ ! -d "${MODEL_DIR}" || -z "$(find "${MODEL_DIR}" -maxdepth 1 -type l -o -t
   # shellcheck disable=SC1090
   source "${ENV_FILE}"
   set +a
-  MODEL_DIR="${MODEL_DIR:-${PROJECT_ROOT}/.runtime/omlx-models}"
+  MODEL_DIR="${MODEL_DIR:-${OMLX_HOME}/.runtime/omlx-models}"
 fi
 
 if lsof -nP -iTCP:"${OMLX_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then

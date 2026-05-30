@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ENV_FILE="${PROJECT_ROOT}/.env"
+OMLX_HOME="${OMLX_HOME:-${PROJECT_ROOT}}"
+ENV_FILE="${OMLX_HOME}/.env"
 
 OVERRIDE_OBSIDIAN_SHARED_PATH_SET="${OBSIDIAN_SHARED_PATH+x}"
 OVERRIDE_OBSIDIAN_SHARED_PATH="${OBSIDIAN_SHARED_PATH:-}"
@@ -58,22 +59,22 @@ RAG_OCR_LANGUAGE_SOURCE="${RAG_OCR_LANGUAGE_SOURCE:-https://raw.githubuserconten
 
 case "${RAG_INDEX_PATH}" in
   /*) RAG_INDEX_ABS="${RAG_INDEX_PATH}" ;;
-  *) RAG_INDEX_ABS="${PROJECT_ROOT}/${RAG_INDEX_PATH}" ;;
+  *) RAG_INDEX_ABS="${OMLX_HOME}/${RAG_INDEX_PATH}" ;;
 esac
 
 case "${RAG_DOCKER_INDEX_PATH}" in
   /*) RAG_DOCKER_INDEX_ABS="${RAG_DOCKER_INDEX_PATH}" ;;
-  *) RAG_DOCKER_INDEX_ABS="${PROJECT_ROOT}/${RAG_DOCKER_INDEX_PATH}" ;;
+  *) RAG_DOCKER_INDEX_ABS="${OMLX_HOME}/${RAG_DOCKER_INDEX_PATH}" ;;
 esac
 
 case "${RAG_VENV_PATH}" in
   /*) RAG_VENV_ABS="${RAG_VENV_PATH}" ;;
-  *) RAG_VENV_ABS="${PROJECT_ROOT}/${RAG_VENV_PATH}" ;;
+  *) RAG_VENV_ABS="${OMLX_HOME}/${RAG_VENV_PATH}" ;;
 esac
 
 case "${RAG_OCR_TESSDATA_PATH}" in
   /*) RAG_OCR_TESSDATA_ABS="${RAG_OCR_TESSDATA_PATH}" ;;
-  *) RAG_OCR_TESSDATA_ABS="${PROJECT_ROOT}/${RAG_OCR_TESSDATA_PATH}" ;;
+  *) RAG_OCR_TESSDATA_ABS="${OMLX_HOME}/${RAG_OCR_TESSDATA_PATH}" ;;
 esac
 
 PID_FILE="${RAG_INDEX_ABS}/rag-service.pid"
@@ -297,7 +298,7 @@ wait_docker_api() {
 
 docker_install() {
   ensure_enabled
-  mkdir -p "${RAG_DOCKER_INDEX_ABS}" "${PROJECT_ROOT}/.runtime/rag-cache" "${PROJECT_ROOT}/.runtime/rag-api-venv" "${PROJECT_ROOT}/.runtime/qdrant"
+  mkdir -p "${RAG_DOCKER_INDEX_ABS}" "${OMLX_HOME}/.runtime/rag-cache" "${OMLX_HOME}/.runtime/rag-api-venv" "${OMLX_HOME}/.runtime/qdrant"
   docker_image_preflight
   if [[ "${RAG_DOCKER_PULL_POLICY}" == "missing" ]] && docker_images_present; then
     echo "Docker RAG images already present locally; skipping pull."
@@ -320,7 +321,7 @@ docker_index() {
 
 docker_start() {
   ensure_enabled
-  mkdir -p "${RAG_DOCKER_INDEX_ABS}" "${PROJECT_ROOT}/.runtime/rag-cache" "${PROJECT_ROOT}/.runtime/rag-api-venv" "${PROJECT_ROOT}/.runtime/qdrant"
+  mkdir -p "${RAG_DOCKER_INDEX_ABS}" "${OMLX_HOME}/.runtime/rag-cache" "${OMLX_HOME}/.runtime/rag-api-venv" "${OMLX_HOME}/.runtime/qdrant"
   if ! docker_rag_running && [[ -n "$(port_service_pids)" ]]; then
     die "Host RAG is already listening on http://${RAG_HOST}:${RAG_PORT}. Stop it with RAG_RUNTIME=host make rag-stop before starting Docker RAG."
   fi

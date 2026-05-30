@@ -17,7 +17,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ENV_FILE="${PROJECT_ROOT}/.env"
+OMLX_HOME="${OMLX_HOME:-${PROJECT_ROOT}}"
+ENV_FILE="${OMLX_HOME}/.env"
 ENV_EXAMPLE="${PROJECT_ROOT}/.env.example"
 
 # ── Colour palette ────────────────────────────────────────────────────────────
@@ -647,7 +648,7 @@ configure_model() {
     return
   fi
 
-  local catalog="${PROJECT_ROOT}/.runtime/lmstudio-models.json"
+  local catalog="${OMLX_HOME}/.runtime/lmstudio-models.json"
   if [[ ! -s "${catalog}" ]]; then
     warn "No MLX safetensors models found in LM Studio."
     warn "Download a model in LM Studio, then run: make model-select"
@@ -769,7 +770,7 @@ configure_rag() {
     "${SCRIPT_DIR}/rag-control.sh" start
 
     substep "Starting background indexing..."
-    local log_file=".runtime/rag-docker/rag-index.log"
+    local log_file="${OMLX_HOME}/.runtime/rag-docker/rag-index.log"
     mkdir -p "$(dirname "${log_file}")"
     nohup "${SCRIPT_DIR}/rag-control.sh" index > "${log_file}" 2>&1 &
     info "Indexing in background — check progress: make rag-index-status"
@@ -937,7 +938,7 @@ DONE
     local agent_data_dir
     agent_data_dir="$(env_get AGENT_DATA_DIR)"
     if [[ -z "${agent_data_dir}" ]]; then
-      agent_data_dir="${SCRIPT_DIR}/../.runtime/agent"
+      agent_data_dir="${OMLX_HOME}/.runtime/agent"
     fi
     printf "  ${BOLD}Agent data:${RESET} %s\n" "${agent_data_dir}"
   fi

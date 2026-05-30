@@ -252,7 +252,8 @@ def main() -> int:
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parents[1]
-    env = load_env(project_root / ".env")
+    env_file = Path(os.environ.get("OMLX_HOME", str(project_root))) / ".env"
+    env = load_env(env_file)
     min_age_hours = float(os.environ.get("MODEL_CLEAN_MIN_AGE_HOURS", env.get("MODEL_CLEAN_MIN_AGE_HOURS", "1")))
     reporter = Reporter(args.delete or os.environ.get("DELETE") == "1", min_age_hours * 3600)
 

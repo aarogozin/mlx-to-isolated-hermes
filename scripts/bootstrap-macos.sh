@@ -8,7 +8,8 @@ BREW_BIN="/opt/homebrew/bin/brew"
 ZPROFILE="${HOME}/.zprofile"
 LMS_DIR="${HOME}/.lmstudio/bin"
 LMS_BIN="${LMS_DIR}/lms"
-ENV_FILE="${PROJECT_ROOT}/.env"
+OMLX_HOME="${OMLX_HOME:-${PROJECT_ROOT}}"
+ENV_FILE="${OMLX_HOME}/.env"
 ENV_EXAMPLE="${PROJECT_ROOT}/.env.example"
 
 log() {

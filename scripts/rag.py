@@ -22,7 +22,7 @@ from typing import Any, Iterable
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ENV_FILE = PROJECT_ROOT / ".env"
+ENV_FILE = Path(os.environ.get("OMLX_HOME", str(PROJECT_ROOT))) / ".env"
 TEXT_EXTENSIONS = ".md,.txt,.rst,.csv,.tsv,.json,.yaml,.yml,.toml,.xml,.html"
 SPREADSHEET_EXTENSIONS = ".xlsx,.xlsm,.xls,.xlsb,.ods"
 PDF_EXTENSIONS = ".pdf"

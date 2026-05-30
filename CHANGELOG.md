@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.3 — 2026-05-30
+
+Global distribution packaging, configuration isolation, and OpenClaw privilege updates:
+
+- **Go CLI Wrapper (`omlx-agent`)**: Compiled Go command-line tool that embeds all static assets (scripts, templates, Compose files) and extracts them on launch or version mismatch to `~/.omlx/dist/`, providing a single executable that works globally.
+- **Dynamic Configuration Isolation (`OMLX_HOME`)**: Updated all shell scripts and Python components to support `OMLX_HOME` environment override, concentrating writeable state, logs, model catalogs, and the `.env` file in the user's home directory (`~/.omlx/`) to keep code and configuration directories separate.
+- **OpenClaw Sandbox Privilege Elevation**: Updated the OpenClaw sandbox in `openclaw-control.sh` to run as `root` (`--user root`) with mapped `HOME=/home/node` for volume configuration persistence. Removed container capability drops and privilege locks (`no-new-privileges`) to enable the agent to install system-level Debian packages and dependencies dynamically.
+- **Homebrew Formula and CI Release Automation**: Added a Homebrew Formula stub in `Formula/omlx-agent.rb` and configured `release.yml` GitHub Actions workflow to build Apple Silicon (`darwin/arm64`) executables, publish release assets, and automatically push updated formula definitions to the custom `homebrew-tap` repository.
+
 ## 0.5.2 — 2026-05-30
 
 Pure Docker transition, RAG optimizations, and setup wizard hardening:

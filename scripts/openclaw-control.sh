@@ -5,7 +5,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ENV_FILE="${PROJECT_ROOT}/.env"
+OMLX_HOME="${OMLX_HOME:-${PROJECT_ROOT}}"
+ENV_FILE="${OMLX_HOME}/.env"
 
 OVERRIDE_OPENCLAW_DOCKER_NAME="${OPENCLAW_DOCKER_NAME:-}"
 OVERRIDE_OPENCLAW_DOCKER_CONFIG_VOLUME="${OPENCLAW_DOCKER_CONFIG_VOLUME:-}"
@@ -158,6 +159,8 @@ docker_run_cli() {
 
   docker run --rm \
     --platform linux/arm64 \
+    --user root \
+    -e HOME=/home/node \
     --add-host host.docker.internal:host-gateway \
     --add-host model-host.internal:host-gateway \
     --add-host rag-host.internal:host-gateway \
@@ -295,6 +298,8 @@ docker_create() {
     --name "${OPENCLAW_DOCKER_NAME}" \
     --platform linux/arm64 \
     --restart unless-stopped \
+    --user root \
+    -e HOME=/home/node \
     --cpus "${DOCKER_CPUS:-2}" \
     --memory "${DOCKER_MEMORY:-4g}" \
     --shm-size "${DOCKER_SHM_SIZE:-1g}" \
@@ -302,9 +307,6 @@ docker_create() {
     --add-host host.docker.internal:host-gateway \
     --add-host model-host.internal:host-gateway \
     --add-host rag-host.internal:host-gateway \
-    --cap-drop NET_RAW \
-    --cap-drop NET_ADMIN \
-    --security-opt no-new-privileges:true \
     "${env_args[@]}" \
     "${mount_args[@]}" \
     "${OPENCLAW_IMAGE}" \

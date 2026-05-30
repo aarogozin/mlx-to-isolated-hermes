@@ -32,3 +32,6 @@ build/
 # ── Docker local data (named volumes are managed by Docker, not git) ──────────
 docker/.data/
 docker/.workspace/
+
+# ── Go CLI binary ─────────────────────────────────────────────────────────────
+omlx-agent

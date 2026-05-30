@@ -3,10 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ENV_FILE="${PROJECT_ROOT}/.env"
+OMLX_HOME="${OMLX_HOME:-${PROJECT_ROOT}}"
+ENV_FILE="${OMLX_HOME}/.env"
 ENV_SET="${SCRIPT_DIR}/env-set.sh"
 
-RUNTIME_CATALOG="${PROJECT_ROOT}/.runtime/lmstudio-models.json"
+RUNTIME_CATALOG="${OMLX_HOME}/.runtime/lmstudio-models.json"
 LMS_BIN="${HOME}/.lmstudio/bin/lms"
 # MODEL_DEFAULT_STRATEGY controls which model is auto-selected when MODEL/MODEL_NAME
 # is not explicitly set. Options:
@@ -36,7 +37,7 @@ else
   LMSTUDIO_MODEL_DIR="${HOME}/.lmstudio/models"
 fi
 
-mkdir -p "${PROJECT_ROOT}/.runtime"
+mkdir -p "${OMLX_HOME}/.runtime"
 
 json="$("${LMS_BIN}" ls --json 2>/dev/null || printf '[]')"
 

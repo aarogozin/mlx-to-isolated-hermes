@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ENV_FILE="${PROJECT_ROOT}/.env"
+OMLX_HOME="${OMLX_HOME:-${PROJECT_ROOT}}"
+ENV_FILE="${OMLX_HOME}/.env"
 
 OVERRIDE_HERMES_IMAGE="${HERMES_IMAGE:-}"
 OVERRIDE_DOCKER_NAME="${DOCKER_NAME:-}"
@@ -90,12 +91,12 @@ normalize_path() {
 agent_data_dir_abs() {
   local dir="${AGENT_DATA_DIR:-}"
   if [[ -z "${dir}" ]]; then
-    dir="${PROJECT_ROOT}/.runtime/agent"
+    dir="${OMLX_HOME}/.runtime/agent"
   else
     dir="$(normalize_path "${dir}")"
     case "${dir}" in
       /*) ;;
-      *) dir="${PROJECT_ROOT}/${dir}" ;;
+      *) dir="${OMLX_HOME}/${dir}" ;;
     esac
   fi
   printf '%s\n' "${dir}"

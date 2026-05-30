@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ENV_FILE="${PROJECT_ROOT}/.env"
+OMLX_HOME="${OMLX_HOME:-${PROJECT_ROOT}}"
+ENV_FILE="${OMLX_HOME}/.env"
 
 OVERRIDE_MATRIX_RAG_QUERY_SET="${MATRIX_RAG_QUERY+x}"
 OVERRIDE_MATRIX_RAG_QUERY="${MATRIX_RAG_QUERY:-}"

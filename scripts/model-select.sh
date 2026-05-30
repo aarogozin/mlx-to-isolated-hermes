@@ -3,8 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ENV_FILE="${PROJECT_ROOT}/.env"
-CATALOG="${PROJECT_ROOT}/.runtime/lmstudio-models.json"
+OMLX_HOME="${OMLX_HOME:-${PROJECT_ROOT}}"
+ENV_FILE="${OMLX_HOME}/.env"
+CATALOG="${OMLX_HOME}/.runtime/lmstudio-models.json"
 
 OVERRIDE_SANDBOX_BACKEND="${SANDBOX_BACKEND:-}"
 
