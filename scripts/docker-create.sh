@@ -169,6 +169,7 @@ write_data_volume() {
     -e GATEWAY_ALLOWED_USERS="${GATEWAY_ALLOWED_USERS}" \
     -e GATEWAY_ALLOW_ALL_USERS="${GATEWAY_ALLOW_ALL_USERS}" \
     -e RAG_BASE_URL="${RAG_BASE_URL_DOCKER}" \
+    -e HERMES_YOLO_MODE="${HERMES_YOLO_MODE:-}" \
     -v "${SCRIPT_DIR}/rag-search-bridge.sh:/tmp/rag-search:ro" \
     -v "${data_mount}" \
     -v "${workspace_mount}" \
@@ -197,6 +198,7 @@ append_env_if_set TELEGRAM_GROUP_ALLOWED_USERS "${TELEGRAM_GROUP_ALLOWED_USERS}"
 append_env_if_set TELEGRAM_GROUP_ALLOWED_CHATS "${TELEGRAM_GROUP_ALLOWED_CHATS}"
 append_env_if_set GATEWAY_ALLOWED_USERS "${GATEWAY_ALLOWED_USERS}"
 append_env_if_set GATEWAY_ALLOW_ALL_USERS "${GATEWAY_ALLOW_ALL_USERS}"
+append_env_if_set HERMES_YOLO_MODE "${HERMES_YOLO_MODE:-}"
 cat > /opt/data/config.yaml <<EOF
 model:
   provider: local-omlx
@@ -264,6 +266,7 @@ fi
   -e HERMES_DASHBOARD_PORT="${HERMES_DASHBOARD_PORT}" \
   -e HERMES_DASHBOARD_TUI="${HERMES_DASHBOARD_TUI:-0}" \
   -e HERMES_DASHBOARD_INSECURE="${HERMES_DASHBOARD_INSECURE}" \
+  -e HERMES_YOLO_MODE="${HERMES_YOLO_MODE:-}" \
   -e PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   "${mount_args[@]}" \
   "${DOCKER_IMAGE}" \

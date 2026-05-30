@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.6 — 2026-05-30
+
+Integrated HERMES_YOLO_MODE support:
+
+- **YOLO Mode Support**: Propagated `HERMES_YOLO_MODE` environment variable from the host to the Docker sandbox container, allowing users to run the Hermes agent autonomously without tool execution prompts.
+
 ## 0.5.5 — 2026-05-30
 
 Preserved TUI preferences and dashboard chat activation:
