@@ -2,9 +2,9 @@
 
 ## 0.5.7 — 2026-05-30
 
-Persistent Playwright browser installation path:
+Removed Playwright browser dependency in favor of MCP Brave Search:
 
-- **Persistent Playwright Path**: Configured `PLAYWRIGHT_BROWSERS_PATH=/opt/data/.playwright` inside the container in `docker-create.sh`, ensuring downloaded browser binaries survive container updates and recreations.
+- **Browser Removal**: Reverted persistent Playwright configuration and deleted browser binaries to optimize container footprint, replacing web queries with lightweight Brave Search API.
 
 ## 0.5.6 — 2026-05-30
 
