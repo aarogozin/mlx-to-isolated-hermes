@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.8 — 2026-05-30
+
+Integrated Model Context Protocol (MCP) servers and config merging:
+
+- **MCP Servers Integration**: Added default config setups for `brave-search`, `github`, `filesystem`, `fetch`, and `git` MCP servers inside the Hermes container.
+- **Auto-Activation of MCPs**: Optional MCP servers (`brave-search` and `github`) are auto-enabled based on the presence of `BRAVE_API_KEY` and `GITHUB_PERSONAL_ACCESS_TOKEN` in the environment.
+- **Config Persistence**: Replaced the destructive raw overwrite of `config.yaml` with a Python-based merging script that preserves user-customized settings upon container recreation.
+
 ## 0.5.7 — 2026-05-30
 
 Removed Playwright browser dependency in favor of MCP Brave Search:
