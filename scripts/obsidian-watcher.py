@@ -139,10 +139,11 @@ def process_task(file_path):
         agent_response = res.stdout.strip()
         date_str = datetime.now().strftime("%Y-%m-%d")
         
-        # Save detailed response to researches/
-        RESEARCHES_DIR.mkdir(parents=True, exist_ok=True)
-        research_file_name = f"{date_str}_{file_path.name}"
-        research_file_path = RESEARCHES_DIR / research_file_name
+        # Save detailed response to researches/YYYY-MM-DD/
+        daily_dir = RESEARCHES_DIR / date_str
+        daily_dir.mkdir(parents=True, exist_ok=True)
+        research_file_name = file_path.name
+        research_file_path = daily_dir / research_file_name
         
         research_content = (
             f"# Research: {file_path.stem.replace('_', ' ').title()}\n"
@@ -156,7 +157,7 @@ def process_task(file_path):
         try:
             research_file_path.write_text(research_content, encoding="utf-8")
             # Point to the research file in frontmatter
-            fm["research_file"] = f"researches/{research_file_name}"
+            fm["research_file"] = f"researches/{date_str}/{research_file_name}"
         except Exception as e:
             print(f"Failed to write research file: {e}")
             fm["research_file_error"] = str(e)
