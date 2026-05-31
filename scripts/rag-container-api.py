@@ -305,7 +305,8 @@ def tei_embeddings(texts: list[str]) -> list[list[float]]:
     batch_size = 16
     results = []
     for i in range(0, len(texts), batch_size):
-        batch = texts[i : i + batch_size]
+        # Truncate each text chunk to a safe maximum limit of 10000 characters to prevent TEI 413 Payload Too Large
+        batch = [t[:10000] for t in texts[i : i + batch_size]]
         payload = {"input": batch, "model": env("RAG_EMBEDDING_MODEL", "intfloat/multilingual-e5-small")}
         try:
             response = requests.post(base + "/v1/embeddings", json=payload, timeout=180)
