@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.15 — 2026-05-31
+
+Fix automated Chromium container installation and add task abort mechanism:
+
+- **Chromium Footprint and Stability**: Added `--no-install-recommends` during automated chromium packages setup inside `docker-control.sh` and `telegram-control.sh` to prevent OOM/limit issues that previously caused the container's boot script execution to be terminated.
+- **Asynchronous & Interruptible Watcher**: Re-engineered the note-driven watcher `obsidian-watcher.py` using non-blocking asynchronous process spawning and active PID tracking.
+- **Task Abort Flow**: Users can now stop running research agents on the fly by changing the note's status from `processing` to anything else (or deleting the file). The watcher will automatically terminate the process, record the abort error, and archive the note.
+- **Dynamic Polling**: Increased polling frequency to every 2 seconds when a task is running (for instant response to cancellations) while maintaining the resource-saving 30-second interval when idle.
+
 ## 0.5.14 — 2026-05-31
 
 Refined Obsidian note task layout, daily research partitioning, and archiving:

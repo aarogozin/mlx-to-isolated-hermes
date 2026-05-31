@@ -8,7 +8,7 @@ serves them through an OpenAI-compatible API, and an optional RAG service
 indexes your documents. The agent runs in Docker with its data visible on the
 host filesystem.
 
-**Version:** `0.5.14`
+**Version:** `0.5.15`
 
 ---
 
@@ -122,6 +122,12 @@ Analyze Apple's financial performance for the last quarter and write a brief sum
 
 Now compare these figures with Microsoft's performance in the same quarter.
 ```
+
+### 5. Stopping / Aborting Running Researches
+If a research task gets stuck, goes into a loop, or you simply want to cancel it:
+- Open the active task note in your vault (which will have `status: processing` in the frontmatter).
+- Change the `status` field to anything other than `processing` (e.g. `status: stop` or `status: abort`), or delete the task file entirely.
+- The background watcher (which polls every 2 seconds during active execution for high responsiveness) will immediately detect this change, terminate the running agent process inside the container, record an abort error, and archive the note to `_tasks/archive/` to keep your workspace clean.
 
 ---
 
