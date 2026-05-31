@@ -260,7 +260,7 @@ default_mcp_servers = {
     },
     "yfinance": {
         "command": "env",
-        "args": ["-i", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "uvx", "mcp-server-yfinance"],
+        "args": ["-i", "-C", "/tmp", "HOME=/tmp", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "uvx", "mcp-server-yfinance"],
         "enabled": True
     },
     "puppeteer": {
@@ -334,6 +334,8 @@ if config_path.exists():
         else:
             data["mcp_servers"][k]["command"] = v["command"]
             data["mcp_servers"][k]["args"] = v["args"]
+            if "cwd" in v:
+                data["mcp_servers"][k]["cwd"] = v["cwd"]
             if "env" in v:
                 if "env" not in data["mcp_servers"][k] or not isinstance(data["mcp_servers"][k]["env"], dict):
                     data["mcp_servers"][k]["env"] = {}
