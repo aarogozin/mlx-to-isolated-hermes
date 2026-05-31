@@ -276,6 +276,15 @@ default_mcp_servers = {
         "command": "uvx",
         "args": ["mcp-server-docker"],
         "enabled": True
+    },
+    "firecrawl": {
+        "command": "npx",
+        "args": ["-y", "firecrawl-mcp"],
+        "env": {
+            "FIRECRAWL_API_KEY": "dummy",
+            "FIRECRAWL_API_URL": "http://host.docker.internal:3002"
+        },
+        "enabled": True
     }
 }
 

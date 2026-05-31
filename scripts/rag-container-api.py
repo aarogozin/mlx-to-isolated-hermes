@@ -189,7 +189,7 @@ def tika_extract(path: Path, ocr_strategy: str | None = None) -> str:
     if ocr_strategy:
         headers["X-Tika-PDFOcrStrategy"] = ocr_strategy
     with path.open("rb") as handle:
-        response = requests.put(url, data=handle, headers=headers, timeout=45)
+        response = requests.put(url, data=handle, headers=headers, timeout=300)
     response.raise_for_status()
     return response.text.strip()
 
@@ -202,7 +202,7 @@ def docling_extract(path: Path) -> str:
         try:
             with path.open("rb") as handle:
                 files = {"files": (path.name, handle, mimetypes.guess_type(path.name)[0] or "application/octet-stream")}
-                response = requests.post(base + endpoint, files=files, timeout=45)
+                response = requests.post(base + endpoint, files=files, timeout=300)
             if response.status_code >= 400:
                 continue
             content_type = response.headers.get("content-type", "")
@@ -302,17 +302,27 @@ def hash_embedding(text: str, dim: int | None = None) -> list[float]:
 
 def tei_embeddings(texts: list[str]) -> list[list[float]]:
     base = env("RAG_TEI_URL", "http://tei:80").rstrip("/")
-    payload = {"input": texts, "model": env("RAG_EMBEDDING_MODEL", "intfloat/multilingual-e5-small")}
-    response = requests.post(base + "/v1/embeddings", json=payload, timeout=180)
-    if response.status_code < 400:
-        data = response.json().get("data", [])
-        return [item["embedding"] for item in data]
-    response = requests.post(base + "/embed", json={"inputs": texts}, timeout=180)
-    response.raise_for_status()
-    payload = response.json()
-    if isinstance(payload, list) and payload and isinstance(payload[0], list):
-        return payload
-    raise RuntimeError("unexpected TEI embedding response")
+    batch_size = 16
+    results = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        payload = {"input": batch, "model": env("RAG_EMBEDDING_MODEL", "intfloat/multilingual-e5-small")}
+        try:
+            response = requests.post(base + "/v1/embeddings", json=payload, timeout=180)
+            if response.status_code < 400:
+                data = response.json().get("data", [])
+                results.extend([item["embedding"] for item in data])
+                continue
+        except Exception:
+            pass
+        response = requests.post(base + "/embed", json={"inputs": batch}, timeout=180)
+        response.raise_for_status()
+        payload = response.json()
+        if isinstance(payload, list) and payload and isinstance(payload[0], list):
+            results.extend(payload)
+        else:
+            raise RuntimeError("unexpected TEI embedding response")
+    return results
 
 
 def embed(texts: list[str]) -> list[list[float]]:

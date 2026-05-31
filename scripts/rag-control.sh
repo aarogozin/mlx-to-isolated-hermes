@@ -24,6 +24,10 @@ OVERRIDE_RAG_ENABLED_SET="${RAG_ENABLED+x}"
 OVERRIDE_RAG_ENABLED="${RAG_ENABLED:-}"
 OVERRIDE_RAG_RUNTIME_SET="${RAG_RUNTIME+x}"
 OVERRIDE_RAG_RUNTIME="${RAG_RUNTIME:-}"
+OVERRIDE_SYNCTHING_ENABLED_SET="${SYNCTHING_ENABLED+x}"
+OVERRIDE_SYNCTHING_ENABLED="${SYNCTHING_ENABLED:-}"
+OVERRIDE_SYNCTHING_SYNC_PATH_SET="${SYNCTHING_SYNC_PATH+x}"
+OVERRIDE_SYNCTHING_SYNC_PATH="${SYNCTHING_SYNC_PATH:-}"
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -44,8 +48,17 @@ fi
 if [[ -n "${OVERRIDE_RAG_DOCKER_INDEX_PATH_SET}" ]]; then
   RAG_DOCKER_INDEX_PATH="${OVERRIDE_RAG_DOCKER_INDEX_PATH}"
 fi
+if [[ -n "${OVERRIDE_SYNCTHING_ENABLED_SET}" ]]; then
+  SYNCTHING_ENABLED="${OVERRIDE_SYNCTHING_ENABLED}"
+fi
+if [[ -n "${OVERRIDE_SYNCTHING_SYNC_PATH_SET}" ]]; then
+  SYNCTHING_SYNC_PATH="${OVERRIDE_SYNCTHING_SYNC_PATH}"
+fi
 
 RAG_ENABLED="${OVERRIDE_RAG_ENABLED:-${RAG_ENABLED:-1}}"
+SYNCTHING_ENABLED="${SYNCTHING_ENABLED:-${SYNCTHING_ENABLED:-0}}"
+SYNCTHING_PORT="${SYNCTHING_PORT:-8384}"
+SYNCTHING_BIND_HOST="${SYNCTHING_BIND_HOST:-127.0.0.1}"
 RAG_RUNTIME="${OVERRIDE_RAG_RUNTIME:-${RAG_RUNTIME:-docker}}"
 RAG_INDEX_PATH="${RAG_INDEX_PATH:-.runtime/rag}"
 RAG_DOCKER_INDEX_PATH="${RAG_DOCKER_INDEX_PATH:-.runtime/rag-docker}"
@@ -66,6 +79,8 @@ case "${RAG_DOCKER_INDEX_PATH}" in
   /*) RAG_DOCKER_INDEX_ABS="${RAG_DOCKER_INDEX_PATH}" ;;
   *) RAG_DOCKER_INDEX_ABS="${OMLX_HOME}/${RAG_DOCKER_INDEX_PATH}" ;;
 esac
+
+SYNCTHING_CONFIG_ABS="${OMLX_HOME}/.runtime/syncthing-config"
 
 case "${RAG_VENV_PATH}" in
   /*) RAG_VENV_ABS="${RAG_VENV_PATH}" ;;
@@ -141,6 +156,25 @@ rag_source_path() {
   printf '%s\n' "${path}"
 }
 
+syncthing_sync_path() {
+  local path="${SYNCTHING_SYNC_PATH:-}"
+  if [[ -z "${path}" ]]; then
+    local r_path
+    r_path="$(rag_source_path 2>/dev/null || echo "")"
+    if [[ -n "${r_path}" ]]; then
+      path="$(dirname "${r_path}")"
+    else
+      path="${PROJECT_ROOT}"
+    fi
+  fi
+  path="${path/#\~/${HOME}}"
+  case "${path}" in
+    /*) ;;
+    *) path="${PROJECT_ROOT}/${path}" ;;
+  esac
+  printf '%s\n' "${path}"
+}
+
 compose_env_args() {
   local source_mount
   if ! source_mount="$(rag_source_path 2>/dev/null)"; then
@@ -150,8 +184,14 @@ compose_env_args() {
       rag_source_path
     fi
   fi
+  local sync_mount
+  sync_mount="$(syncthing_sync_path 2>/dev/null || echo "${PROJECT_ROOT}")"
   printf '%s\0' \
     "RAG_SOURCE_MOUNT=${source_mount}" \
+    "SYNCTHING_SYNC_MOUNT=${sync_mount}" \
+    "SYNCTHING_CONFIG_MOUNT=${SYNCTHING_CONFIG_ABS}" \
+    "SYNCTHING_PORT=${SYNCTHING_PORT}" \
+    "SYNCTHING_BIND_HOST=${SYNCTHING_BIND_HOST}" \
     "RAG_INDEX_MOUNT=${RAG_DOCKER_INDEX_ABS}" \
     "RAG_TESSDATA_MOUNT=${RAG_OCR_TESSDATA_ABS}" \
     "RAG_DOCKER_NAME=${RAG_DOCKER_NAME}" \
@@ -196,9 +236,21 @@ docker_compose() {
   while IFS= read -r -d '' item; do
     env_args+=("${item}")
   done < <(compose_env_args)
+  
+  local -a profiles=()
   if [[ "${RAG_DOCKER_EMBEDDING_BACKEND}" == "tei" ]]; then
-    env_args+=("COMPOSE_PROFILES=tei")
+    profiles+=("tei")
   fi
+  if [[ "${SYNCTHING_ENABLED}" == "1" || "${SYNCTHING_ENABLED}" == "true" ]]; then
+    profiles+=("syncthing")
+  fi
+  
+  if [[ "${#profiles[@]}" -gt 0 ]]; then
+    local compose_profiles
+    compose_profiles="$(IFS=,; echo "${profiles[*]}")"
+    env_args+=("COMPOSE_PROFILES=${compose_profiles}")
+  fi
+  
   env "${env_args[@]}" docker compose \
     -f "${RAG_DOCKER_COMPOSE_FILE}" \
     --project-name "${RAG_DOCKER_PROJECT}" \
@@ -298,7 +350,12 @@ wait_docker_api() {
 
 docker_install() {
   ensure_enabled
-  mkdir -p "${RAG_DOCKER_INDEX_ABS}" "${OMLX_HOME}/.runtime/rag-cache" "${OMLX_HOME}/.runtime/rag-api-venv" "${OMLX_HOME}/.runtime/qdrant"
+  mkdir -p "${RAG_DOCKER_INDEX_ABS}" "${OMLX_HOME}/.runtime/rag-cache" "${OMLX_HOME}/.runtime/rag-api-venv" "${OMLX_HOME}/.runtime/qdrant" "${SYNCTHING_CONFIG_ABS}"
+  local sync_dir
+  sync_dir="$(syncthing_sync_path 2>/dev/null || echo "")"
+  if [[ -n "${sync_dir}" ]]; then
+    mkdir -p "${sync_dir}"
+  fi
   docker_image_preflight
   if [[ "${RAG_DOCKER_PULL_POLICY}" == "missing" ]] && docker_images_present; then
     echo "Docker RAG images already present locally; skipping pull."
@@ -321,7 +378,12 @@ docker_index() {
 
 docker_start() {
   ensure_enabled
-  mkdir -p "${RAG_DOCKER_INDEX_ABS}" "${OMLX_HOME}/.runtime/rag-cache" "${OMLX_HOME}/.runtime/rag-api-venv" "${OMLX_HOME}/.runtime/qdrant"
+  mkdir -p "${RAG_DOCKER_INDEX_ABS}" "${OMLX_HOME}/.runtime/rag-cache" "${OMLX_HOME}/.runtime/rag-api-venv" "${OMLX_HOME}/.runtime/qdrant" "${SYNCTHING_CONFIG_ABS}"
+  local sync_dir
+  sync_dir="$(syncthing_sync_path 2>/dev/null || echo "")"
+  if [[ -n "${sync_dir}" ]]; then
+    mkdir -p "${sync_dir}"
+  fi
   if ! docker_rag_running && [[ -n "$(port_service_pids)" ]]; then
     die "Host RAG is already listening on http://${RAG_HOST}:${RAG_PORT}. Stop it with RAG_RUNTIME=host make rag-stop before starting Docker RAG."
   fi

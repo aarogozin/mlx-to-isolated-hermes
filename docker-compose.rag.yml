@@ -73,19 +73,141 @@ services:
     restart: unless-stopped
     command: ["--model-id", "${RAG_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}", "--port", "80"]
     environment:
-      HF_HOME: /cache/huggingface
+      HF_HOME: /data
     volumes:
-      - rag-cache:/cache
+      - rag-cache:/data
+    deploy:
+      resources:
+        limits:
+          memory: 3G
 
   tika:
     image: ${RAG_TIKA_IMAGE:-apache/tika:latest-full}
     container_name: ${RAG_TIKA_NAME:-mlx-isolated-rag-tika}
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1500M
 
   docling:
     image: ${RAG_DOCLING_IMAGE:-quay.io/docling-project/docling-serve:latest}
     container_name: ${RAG_DOCLING_NAME:-mlx-isolated-rag-docling}
     restart: unless-stopped
+    environment:
+      DOCLING_SERVE_MAX_SYNC_WAIT: 300
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+
+  playwright-service:
+    image: ghcr.io/firecrawl/playwright-service:latest
+    container_name: mlx-firecrawl-playwright
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      PROXY_SERVER: ${FIRECRAWL_PROXY_SERVER:-}
+      PROXY_USERNAME: ${FIRECRAWL_PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${FIRECRAWL_PROXY_PASSWORD:-}
+      ALLOW_LOCAL_WEBHOOKS: ${FIRECRAWL_ALLOW_LOCAL_WEBHOOKS:-true}
+      BLOCK_MEDIA: ${FIRECRAWL_BLOCK_MEDIA:-true}
+      MAX_CONCURRENT_PAGES: ${FIRECRAWL_CRAWL_CONCURRENT_REQUESTS:-10}
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+    tmpfs:
+      - /tmp/.cache:noexec,nosuid,size=512m
+
+  firecrawl-api:
+    image: ghcr.io/firecrawl/firecrawl:latest
+    container_name: mlx-firecrawl-api
+    restart: unless-stopped
+    command: node dist/src/harness.js --start-docker
+    environment:
+      REDIS_URL: redis://redis:6379
+      REDIS_RATE_LIMIT_URL: redis://redis:6379
+      PLAYWRIGHT_MICROSERVICE_URL: http://playwright-service:3000/scrape
+      POSTGRES_USER: ${FIRECRAWL_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${FIRECRAWL_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${FIRECRAWL_POSTGRES_DB:-postgres}
+      POSTGRES_HOST: nuq-postgres
+      POSTGRES_PORT: 5432
+      USE_DB_AUTHENTICATION: "false"
+      NUM_WORKERS_PER_QUEUE: ${FIRECRAWL_NUM_WORKERS_PER_QUEUE:-8}
+      CRAWL_CONCURRENT_REQUESTS: ${FIRECRAWL_CRAWL_CONCURRENT_REQUESTS:-10}
+      MAX_CONCURRENT_JOBS: ${FIRECRAWL_MAX_CONCURRENT_JOBS:-5}
+      BROWSER_POOL_SIZE: ${FIRECRAWL_BROWSER_POOL_SIZE:-5}
+      BULL_AUTH_KEY: ${FIRECRAWL_BULL_AUTH_KEY:-omlx_firecrawl_secret_auth_key}
+      HOST: 0.0.0.0
+      PORT: 3002
+      INTERNAL_PORT: 3002
+      EXTRACT_WORKER_PORT: 3004
+      WORKER_PORT: 3005
+      NUQ_RABBITMQ_URL: amqp://rabbitmq:5672
+      HARNESS_STARTUP_TIMEOUT_MS: 60000
+      ENV: local
+    depends_on:
+      redis:
+        condition: service_started
+      playwright-service:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "${FIRECRAWL_BIND_HOST:-127.0.0.1}:${FIRECRAWL_PORT:-3002}:3002"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+  redis:
+    image: redis:alpine
+    container_name: mlx-firecrawl-redis
+    restart: unless-stopped
+    command: redis-server --bind 0.0.0.0
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: mlx-firecrawl-rabbitmq
+    restart: unless-stopped
+    command: rabbitmq-server
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  nuq-postgres:
+    image: ghcr.io/firecrawl/nuq-postgres:latest
+    container_name: mlx-firecrawl-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${FIRECRAWL_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${FIRECRAWL_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${FIRECRAWL_POSTGRES_DB:-postgres}
+
+  syncthing:
+    image: syncthing/syncthing:latest
+    container_name: mlx-syncthing
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      - PUID=0
+      - PGID=0
+    volumes:
+      - rag-syncthing-config:/var/syncthing/config
+      - ${SYNCTHING_SYNC_MOUNT:?Set SYNCTHING_SYNC_PATH in .env}:/var/syncthing/Sync
+    ports:
+      - "${SYNCTHING_BIND_HOST:-127.0.0.1}:${SYNCTHING_PORT:-8384}:8384"
+      - "22000:22000/tcp"
+      - "22000:22000/udp"
+      - "21027:21027/udp"
+    profiles: ["syncthing"]
 
 # Named Docker volumes — managed by Docker, survive make rag-down / rag-up.
 # To wipe and reindex from scratch: docker volume rm mlx-isolated-rag_rag-qdrant
@@ -93,3 +215,5 @@ volumes:
   rag-qdrant:
   rag-api-venv:
   rag-cache:
+  rag-syncthing-config:
+
