@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.14 — 2026-05-31
+
+Refined Obsidian note task layout, daily research partitioning, and archiving:
+
+- **Daily Research Partitioning**: Saves detailed research notes inside date-partitioned folders (`researches/YYYY-MM-DD/task_name.md`) instead of cluttering the root researches directory.
+- **Task Archiving**: Automatically moves completed or failed task files from the root `_tasks/` directory to `_tasks/archive/` to keep the active tasks folder clean, while updating the metadata reference with `status: completed` and a `research_file` link.
+- **Follow-up Workflow**: Updated documentation on how to resume chat threads by returning the archived note to `_tasks/` and setting `status: pending` (maintaining the `session_id`).
+
 ## 0.5.13 — 2026-05-31
 
 Refined Obsidian Watcher strictness:

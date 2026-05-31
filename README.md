@@ -8,7 +8,7 @@ serves them through an OpenAI-compatible API, and an optional RAG service
 indexes your documents. The agent runs in Docker with its data visible on the
 host filesystem.
 
-**Version:** `0.5.13`
+**Version:** `0.5.14`
 
 ---
 
@@ -96,28 +96,29 @@ Analyze Apple's financial performance for the last quarter and write a brief sum
 When the watcher detects the pending status:
 1. It updates the frontmatter to `status: processing` and records `started_at: <timestamp>`.
 2. It executes the note's prompt through the Hermes CLI.
-3. Once completed, it appends the agent's response at the bottom under `## Agent Response (<timestamp>)` and updates the frontmatter to `status: completed` and sets `completed_at`.
+3. Once completed:
+   - It writes the detailed response/result to `researches/YYYY-MM-DD/task_name.md`.
+   - It updates the task note's frontmatter to `status: completed` and adds a reference link to the results: `research_file: researches/YYYY-MM-DD/task_name.md`.
+   - It moves the task note from the root `_tasks/` directory to `_tasks/archive/task_name.md` to keep your task list clean and prevent reprocessing.
 
 ### 4. Continuous Chats / Multi-turn Conversations
-To reply to the agent or ask follow-up questions, keep the same note, add your next question at the bottom, and set the frontmatter `status` back to `pending`.
+Since archived tasks are ignored by the watcher, to ask follow-up questions:
+1. Move the archived note back to the root `_tasks/` directory.
+2. Append your next question or prompt at the bottom of the note.
+3. Set the frontmatter `status` back to `pending`.
 
-The watcher will automatically detect any `session` or `session_id` inside the frontmatter and resume the conversation seamlessly.
+The watcher will detect the note, read the `session_id` inside the frontmatter, and resume the conversation seamlessly.
 
-Example follow-up note:
+Example follow-up note (before setting status to pending and moving it back to `_tasks/`):
 ```markdown
 ---
 completed_at: '2026-05-31T09:38:37Z'
 started_at: '2026-05-31T09:38:28Z'
 status: pending
 session_id: '20260531_093828_ba6c86'
+research_file: researches/2026-05-31/apple-analysis.md
 ---
 Analyze Apple's financial performance for the last quarter and write a brief summary report.
-
-## Agent Response (31.05.2026 09:38)
-
-[Apple Financial Summary...]
-
-***
 
 Now compare these figures with Microsoft's performance in the same quarter.
 ```
