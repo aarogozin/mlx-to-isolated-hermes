@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .PHONY: help bootstrap setup doctor clean-all release-check ci-check matrix-e2e \
 	models-search models-list models-sync models-doctor models-prune-incomplete model-select model-start-bg model-stop-bg model-check omlx-update \
 	rag-install rag-preflight rag-index rag-sync rag-search rag-start rag-stop rag-status rag-doctor rag-up rag-down rag-logs rag-index-status rag-update \
-	agent-start agent-stop agent-restart agent-pause agent-switch agent-status agent-logs agent-shell agent-open-dashboard agent-update agent-data agent-voice
+	agent-start agent-stop agent-restart agent-pause agent-switch agent-status agent-logs agent-shell agent-open-dashboard agent-update agent-data
 
 help:
 	@printf '%s\n' 'mlx-to-isolated-agent commands'
@@ -33,7 +33,6 @@ help:
 	@printf '  %-24s %s\n' 'make agent-data' 'Show agent data directory on host'
 	@printf '  %-24s %s\n' 'make agent-open-dashboard' 'Open Dashboard/Control UI'
 	@printf '  %-24s %s\n' 'make agent-shell' 'Shell into selected sandbox'
-	@printf '  %-24s %s\n' 'make agent-voice' 'Speak to the agent using local mic/Whisper'
 	@printf '\n%s\n' 'Release:'
 	@printf '  %-24s %s\n' 'make ci-check' 'Fast local CI-equivalent checks'
 	@printf '  %-24s %s\n' 'make release-check' 'Full local release gate'
@@ -174,8 +173,3 @@ agent-update:
 
 agent-data:
 	./scripts/docker-control.sh data-path
-
-agent-voice:
-	./scripts/agent-voice.sh
-
-

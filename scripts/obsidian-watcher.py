@@ -181,8 +181,15 @@ def main():
                 fm, _ = parse_note(content)
                 status = fm.get("status")
                 
-                # Treat as pending if status is empty, not set, or set to 'pending'
-                if not status or status == "pending":
+                # ONLY process task if status is explicitly set to 'pending'
+                # and the file has not been modified in the last 5 seconds (debounce to prevent reading partial edits)
+                if status == "pending":
+                    try:
+                        mtime = file_path.stat().st_mtime
+                        if time.time() - mtime < 5:
+                            continue  # Note is still being written to, skip for now
+                    except Exception:
+                        continue
                     process_task(file_path)
                     
         except Exception as e:

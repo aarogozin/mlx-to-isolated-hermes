@@ -124,7 +124,7 @@ docker_start_and_patch() {
   fi
 
   # Ensure chromium is installed inside container for Puppeteer MCP
-  if ! docker exec "${DOCKER_NAME}" command -v chromium >/dev/null 2>&1; then
+  if ! docker exec "${DOCKER_NAME}" sh -c "command -v chromium" >/dev/null 2>&1; then
     echo "Pre-installing chromium inside container (required for Puppeteer)..."
     docker exec -u root "${DOCKER_NAME}" sh -c "apt-get update && apt-get install -y --fix-missing chromium" >/dev/null 2>&1 || true
   fi
