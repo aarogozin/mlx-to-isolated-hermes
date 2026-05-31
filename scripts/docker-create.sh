@@ -329,16 +329,16 @@ if config_path.exists():
         if k not in data["mcp_servers"]:
             data["mcp_servers"][k] = v
         else:
-            if k in ("brave-search", "github"):
+            if "env" in v:
                 if "env" not in data["mcp_servers"][k] or not isinstance(data["mcp_servers"][k]["env"], dict):
                     data["mcp_servers"][k]["env"] = {}
-                
-                if k == "brave-search":
-                    data["mcp_servers"][k]["env"]["BRAVE_API_KEY"] = brave_key
-                    data["mcp_servers"][k]["enabled"] = bool(brave_key)
-                elif k == "github":
-                    data["mcp_servers"][k]["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"] = github_token
-                    data["mcp_servers"][k]["enabled"] = bool(github_token)
+                for env_k, env_v in v["env"].items():
+                    data["mcp_servers"][k]["env"][env_k] = env_v
+            
+            if k == "brave-search":
+                data["mcp_servers"][k]["enabled"] = bool(brave_key)
+            elif k == "github":
+                data["mcp_servers"][k]["enabled"] = bool(github_token)
 else:
     data = new_config
 
@@ -403,6 +403,7 @@ fi
   -e HERMES_DASHBOARD_INSECURE="${HERMES_DASHBOARD_INSECURE}" \
   -e HERMES_YOLO_MODE="${HERMES_YOLO_MODE:-}" \
   -e HF_HOME=/opt/data/.cache/huggingface \
+  -e AGENT_BROWSER_EXECUTABLE_PATH="/usr/bin/chromium" \
   -e PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   "${mount_args[@]}" \
   "${DOCKER_IMAGE}" \

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.16 — 2026-05-31
+
+Fix Chromium path resolution and configuration merging for browser tools:
+
+- **Config Merging Correction**: Fixed config merging logic in `docker-create.sh` which was discarding the `env` block (specifically `PUPPETEER_EXECUTABLE_PATH`) for pre-existing `puppeteer` configurations in `config.yaml`.
+- **System Browser Integration**: Configured `AGENT_BROWSER_EXECUTABLE_PATH="/usr/bin/chromium"` inside the container to point Playwright and the built-in browser engine (`browser_navigate`) to the system Chromium binary.
+- **State Refresh on Installation**: Added s6 service restarts (`main-hermes` and `gateway-default`) after automated Chromium installation to reload the environment and clear cached browser check flags.
+
 ## 0.5.15 — 2026-05-31
 
 Fix automated Chromium container installation and add task abort mechanism:

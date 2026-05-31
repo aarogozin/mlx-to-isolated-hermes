@@ -8,7 +8,7 @@ serves them through an OpenAI-compatible API, and an optional RAG service
 indexes your documents. The agent runs in Docker with its data visible on the
 host filesystem.
 
-**Version:** `0.5.15`
+**Version:** `0.5.16`
 
 ---
 

@@ -199,6 +199,9 @@ docker_start_and_patch() {
     docker exec -u root "${DOCKER_NAME}" sh -c "apt-get update && apt-get install -y --no-install-recommends --fix-missing chromium" >/dev/null 2>&1 || true
   fi
 
+  # Restart main gateway services to reload Chromium binary paths and environment
+  docker exec -u root "${DOCKER_NAME}" /command/s6-svc -r /run/service/main-hermes /run/service/gateway-default >/dev/null 2>&1 || true
+
   # Ensure local Whisper 'base' model is pre-downloaded
   if ! docker exec -e HF_HOME=/opt/data/.cache/huggingface "${DOCKER_NAME}" /opt/hermes/.venv/bin/python3 -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', local_files_only=True)" >/dev/null 2>&1; then
     echo "Pre-downloading local Whisper 'base' model weights..."
