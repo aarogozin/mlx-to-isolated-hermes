@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.10 — 2026-05-31
+
+Integrated local offline Whisper speech-to-text (STT) support:
+
+- **Hugging Face Model Cache Persistence**: Declared the `HF_HOME=/opt/data/.cache/huggingface` environment variable to save model weights under the persistent host directory.
+- **Pre-loaded dependencies**: Configured the container boot scripts (`docker-control.sh` and `telegram-control.sh`) to pre-install `faster-whisper` and pre-download the Whisper `base` model weights, enabling zero-latency and 100% offline transcribing out-of-the-box.
+
 ## 0.5.9 — 2026-05-31
 
 Integrated Yahoo Finance, Puppeteer, and Docker MCP servers:
