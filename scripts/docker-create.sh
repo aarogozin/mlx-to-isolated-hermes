@@ -249,29 +249,32 @@ default_mcp_servers = {
         "enabled": True
     },
     "fetch": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-fetch"],
+        "command": "uvx",
+        "args": ["mcp-server-fetch"],
         "enabled": True
     },
     "git": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-git"],
+        "command": "uvx",
+        "args": ["mcp-server-git"],
         "enabled": True
     },
     "yfinance": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-yfinance"],
+        "command": "env",
+        "args": ["-i", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "uvx", "mcp-server-yfinance"],
         "enabled": True
     },
     "puppeteer": {
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
-        "env": {"PUPPETEER_EXECUTABLE_PATH": "/usr/bin/chromium"},
+        "env": {
+            "PUPPETEER_EXECUTABLE_PATH": "/usr/bin/chromium",
+            "DOCKER_CONTAINER": "true"
+        },
         "enabled": True
     },
     "docker-manager": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-docker"],
+        "command": "uvx",
+        "args": ["mcp-server-docker"],
         "enabled": True
     }
 }
@@ -329,6 +332,8 @@ if config_path.exists():
         if k not in data["mcp_servers"]:
             data["mcp_servers"][k] = v
         else:
+            data["mcp_servers"][k]["command"] = v["command"]
+            data["mcp_servers"][k]["args"] = v["args"]
             if "env" in v:
                 if "env" not in data["mcp_servers"][k] or not isinstance(data["mcp_servers"][k]["env"], dict):
                     data["mcp_servers"][k]["env"] = {}
@@ -403,6 +408,7 @@ fi
   -e HERMES_DASHBOARD_INSECURE="${HERMES_DASHBOARD_INSECURE}" \
   -e HERMES_YOLO_MODE="${HERMES_YOLO_MODE:-}" \
   -e HF_HOME=/opt/data/.cache/huggingface \
+  -e DOCKER_CONTAINER=true \
   -e AGENT_BROWSER_EXECUTABLE_PATH="/usr/bin/chromium" \
   -e PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   "${mount_args[@]}" \
