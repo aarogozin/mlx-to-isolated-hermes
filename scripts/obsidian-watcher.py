@@ -7,11 +7,30 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
+def load_env():
+    env_path = Path("/opt/data/.env")
+    if env_path.exists():
+        try:
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    # Strip quotes if any
+                    k_str = k.strip()
+                    v_str = v.strip().strip("'").strip('"')
+                    os.environ[k_str] = v_str
+        except Exception as e:
+            print(f"Warning: failed to load environment file: {e}")
+
+load_env()
+
 # Setup paths and configurations
 VAULT_DIR = Path("/mnt/obsidian")
 TASKS_DIR = VAULT_DIR / "_tasks"
 LOCK_FILE = Path("/tmp/obsidian-watcher.lock")
-POLL_INTERVAL_SECONDS = 5
+POLL_INTERVAL_SECONDS = int(os.environ.get("OBSIDIAN_WATCH_INTERVAL_SECONDS", "30"))
 
 def acquire_lock():
     """Ensure only one instance of the watcher is running inside the container."""

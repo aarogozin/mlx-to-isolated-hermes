@@ -120,7 +120,13 @@ docker_start_and_patch() {
   # Ensure faster-whisper is installed in virtualenv
   if ! docker exec "${DOCKER_NAME}" /opt/hermes/.venv/bin/python3 -c "import faster_whisper" >/dev/null 2>&1; then
     echo "Pre-installing faster-whisper inside container virtualenv..."
-    docker exec -u root "${DOCKER_NAME}" /opt/hermes/.venv/bin/pip install faster-whisper >/dev/null 2>&1 || true
+    docker exec -u root "${DOCKER_NAME}" /usr/local/bin/uv pip install --python /opt/hermes/.venv/bin/python3 faster-whisper >/dev/null 2>&1 || true
+  fi
+
+  # Ensure chromium is installed inside container for Puppeteer MCP
+  if ! docker exec "${DOCKER_NAME}" command -v chromium >/dev/null 2>&1; then
+    echo "Pre-installing chromium inside container (required for Puppeteer)..."
+    docker exec -u root "${DOCKER_NAME}" sh -c "apt-get update && apt-get install -y --fix-missing chromium" >/dev/null 2>&1 || true
   fi
 
   # Ensure local Whisper 'base' model is pre-downloaded

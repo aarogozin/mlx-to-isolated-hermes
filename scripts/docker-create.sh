@@ -217,6 +217,7 @@ append_env_if_set GATEWAY_ALLOW_ALL_USERS "${GATEWAY_ALLOW_ALL_USERS}"
 append_env_if_set HERMES_YOLO_MODE "${HERMES_YOLO_MODE:-}"
 append_env_if_set BRAVE_API_KEY "${BRAVE_API_KEY}"
 append_env_if_set GITHUB_PERSONAL_ACCESS_TOKEN "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+append_env_if_set OBSIDIAN_WATCH_INTERVAL_SECONDS "${OBSIDIAN_WATCH_INTERVAL_SECONDS:-}"
 /opt/hermes/.venv/bin/python3 -c '\''
 import yaml, sys
 from pathlib import Path
@@ -265,6 +266,7 @@ default_mcp_servers = {
     "puppeteer": {
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+        "env": {"PUPPETEER_EXECUTABLE_PATH": "/usr/bin/chromium"},
         "enabled": True
     },
     "docker-manager": {
