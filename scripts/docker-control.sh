@@ -116,6 +116,19 @@ docker_start_and_patch() {
   # Apply WebSocket loopback gate patch and restart dashboard service:
   docker exec -u root "${DOCKER_NAME}" python3 -c 'p="/opt/hermes/hermes_cli/web_server.py"; c=open(p).read(); c=c.replace("return client_host in _LOOPBACK_HOSTS", "return True"); c=c.replace("return hmac.compare_digest(token.encode(), _SESSION_TOKEN.encode())", "return True"); open(p,"w").write(c)' >/dev/null 2>&1 || true
   docker exec -u root "${DOCKER_NAME}" /command/s6-svc -r /run/service/dashboard >/dev/null 2>&1 || true
+
+  # Ensure faster-whisper is installed in virtualenv
+  if ! docker exec "${DOCKER_NAME}" /opt/hermes/.venv/bin/python3 -c "import faster_whisper" >/dev/null 2>&1; then
+    echo "Pre-installing faster-whisper inside container virtualenv..."
+    docker exec -u root "${DOCKER_NAME}" /opt/hermes/.venv/bin/pip install faster-whisper >/dev/null 2>&1 || true
+  fi
+
+  # Ensure local Whisper 'base' model is pre-downloaded
+  if ! docker exec -e HF_HOME=/opt/data/.cache/huggingface "${DOCKER_NAME}" /opt/hermes/.venv/bin/python3 -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', local_files_only=True)" >/dev/null 2>&1; then
+    echo "Pre-downloading local Whisper 'base' model weights..."
+    docker exec -e HF_HOME=/opt/data/.cache/huggingface "${DOCKER_NAME}" /opt/hermes/.venv/bin/python3 -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', local_files_only=False)" >/dev/null 2>&1 || true
+    docker exec -u root "${DOCKER_NAME}" chown -R hermes:hermes /opt/data/.cache 2>/dev/null || true
+  fi
 }
 
 case "${ACTION}" in
