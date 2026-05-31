@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.9 — 2026-05-31
+
+Integrated Yahoo Finance, Puppeteer, and Docker MCP servers:
+
+- **Docker Socket Mount**: Added `/var/run/docker.sock` volume mount to allow the agent to inspect and manage Docker containers on the host.
+- **Financial & Developer MCPs**: Configured out-of-the-box support for `yfinance` (stock quotes & company data), `puppeteer` (advanced JS scraping), and `docker-manager` (host Docker management).
+
 ## 0.5.8 — 2026-05-30
 
 Integrated Model Context Protocol (MCP) servers and config merging:
