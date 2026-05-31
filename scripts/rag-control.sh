@@ -383,6 +383,9 @@ docker_start() {
   sync_dir="$(syncthing_sync_path 2>/dev/null || echo "")"
   if [[ -n "${sync_dir}" ]]; then
     mkdir -p "${sync_dir}"
+    if [[ "${SYNCTHING_ENABLED}" == "1" || "${SYNCTHING_ENABLED}" == "true" ]]; then
+      mkdir -p "${sync_dir}/.stfolder"
+    fi
   fi
   if ! docker_rag_running && [[ -n "$(port_service_pids)" ]]; then
     die "Host RAG is already listening on http://${RAG_HOST}:${RAG_PORT}. Stop it with RAG_RUNTIME=host make rag-stop before starting Docker RAG."
@@ -390,6 +393,9 @@ docker_start() {
   docker_image_preflight
   docker_compose up -d
   wait_docker_api
+  if [[ "${SYNCTHING_ENABLED}" == "1" || "${SYNCTHING_ENABLED}" == "true" ]]; then
+    "${SCRIPT_DIR}/syncthing-auto-config.py" || echo "Warning: Syncthing auto-configuration failed."
+  fi
   echo "RAG Docker service running: http://${RAG_HOST}:${RAG_PORT}"
 }
 

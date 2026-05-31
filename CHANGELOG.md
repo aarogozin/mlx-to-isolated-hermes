@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.19 — 2026-05-31
+
+Automate folder configuration inside Syncthing:
+
+- **Automated Sync Folder Configuration**: Introduced a Python orchestration helper `scripts/syncthing-auto-config.py` executed automatically upon stack startup. It extracts the container's Syncthing API key and local Device ID, queries the REST API, and automatically adds the `hermes` sync folder mapped to `/var/syncthing/Sync` (without requiring manual user setup in the GUI).
+- **Marker Directory (.stfolder) Auto-creation**: Added automatic creation of the `.stfolder` marker directory inside the target sync directory on the host to prevent Syncthing from failing with "folder marker missing" errors.
+
 ## 0.5.18 — 2026-05-31
 
 Integrate Syncthing peer-to-peer file synchronization and local Firecrawl self-hosted crawling:
