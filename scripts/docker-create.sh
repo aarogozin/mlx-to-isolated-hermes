@@ -364,6 +364,8 @@ if [[ -S "/var/run/docker.sock" || -e "/var/run/docker.sock" ]]; then
   mount_args+=(-v "/var/run/docker.sock:/var/run/docker.sock")
 fi
 
+mount_args+=(-v "${SCRIPT_DIR}/obsidian-watcher.py:/opt/hermes/obsidian-watcher.py:ro")
+
 if [[ -n "${OBSIDIAN_SHARED_PATH}" ]]; then
   OBSIDIAN_SHARED_PATH="$(normalize_path "${OBSIDIAN_SHARED_PATH}")"
   [[ -d "${OBSIDIAN_SHARED_PATH}" ]] || die "OBSIDIAN_SHARED_PATH does not exist: ${OBSIDIAN_SHARED_PATH}"

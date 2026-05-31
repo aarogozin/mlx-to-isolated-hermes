@@ -199,6 +199,9 @@ docker_start_and_patch() {
     docker exec -e HF_HOME=/opt/data/.cache/huggingface "${DOCKER_NAME}" /opt/hermes/.venv/bin/python3 -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', local_files_only=False)" >/dev/null 2>&1 || true
     docker exec -u root "${DOCKER_NAME}" chown -R hermes:hermes /opt/data/.cache 2>/dev/null || true
   fi
+
+  # Start the background Obsidian note watcher service:
+  docker exec -d "${DOCKER_NAME}" /opt/hermes/.venv/bin/python3 /opt/hermes/obsidian-watcher.py
 }
 
 docker_ensure() {
