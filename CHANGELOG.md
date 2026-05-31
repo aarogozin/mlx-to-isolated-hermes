@@ -1,10 +1,18 @@
 # Changelog
 
+## 0.5.13 — 2026-05-31
+
+Refined Obsidian Watcher strictness:
+
+- **Strict Status Guard**: Restrained the note-driven watcher to ONLY process files that have `status: pending` explicitly declared in the frontmatter. Notes without this metadata are completely ignored.
+- **Auto-Debounce**: Added a 5-second modification debounce. The watcher will only pick up a pending task if it has been idle (not saved/modified) for at least 5 seconds, preventing execution of incomplete notes while the user is still actively typing.
+- **Redundant Voice Reversion**: Removed the host-side audio recording script and Makefile target since Telegram voice transcribing is sufficient.
+- **Fixed boot check**: Wrapped `command -v chromium` check in a shell execution (`sh -c`) to prevent always running `apt-get` on container boot.
+
 ## 0.5.12 — 2026-05-31
 
-Integrated Local Voice Control (Whisper) on Host and Puppeteer/Obsidian Improvements:
+Integrated Puppeteer and Obsidian Watcher configurations:
 
-- **Local Host-Side Voice Control**: Added `scripts/agent-voice.sh` and a `make agent-voice` target on the host Mac to capture microphone audio using `ffmpeg` and automatically transcribe it inside the container using the cached local Whisper `base` model.
 - **Configurable Obsidian Polling Interval**: Added `OBSIDIAN_WATCH_INTERVAL_SECONDS` (default: 30 seconds) to `.env` and modified the background watcher to parse container `.env` secrets at startup to adjust the folder scanning frequency, minimizing host CPU overhead when idle.
 - **Automated Chromium / Puppeteer Setup**: Configured the boot logic to automatically check and install system `chromium` via `apt-get` (using `uv` for python dependencies) and injected `PUPPETEER_EXECUTABLE_PATH` to enable the Puppeteer MCP server out-of-the-box.
 
