@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.12 — 2026-05-31
+
+Integrated Local Voice Control (Whisper) on Host and Puppeteer/Obsidian Improvements:
+
+- **Local Host-Side Voice Control**: Added `scripts/agent-voice.sh` and a `make agent-voice` target on the host Mac to capture microphone audio using `ffmpeg` and automatically transcribe it inside the container using the cached local Whisper `base` model.
+- **Configurable Obsidian Polling Interval**: Added `OBSIDIAN_WATCH_INTERVAL_SECONDS` (default: 30 seconds) to `.env` and modified the background watcher to parse container `.env` secrets at startup to adjust the folder scanning frequency, minimizing host CPU overhead when idle.
+- **Automated Chromium / Puppeteer Setup**: Configured the boot logic to automatically check and install system `chromium` via `apt-get` (using `uv` for python dependencies) and injected `PUPPETEER_EXECUTABLE_PATH` to enable the Puppeteer MCP server out-of-the-box.
+
 ## 0.5.11 — 2026-05-31
 
 Integrated Obsidian Note-Driven Workflow:
