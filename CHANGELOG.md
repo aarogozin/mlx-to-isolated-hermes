@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.18 — 2026-05-31
+
+Integrate Syncthing peer-to-peer file synchronization and local Firecrawl self-hosted crawling:
+
+- **Syncthing P2P File Sync**: Added Syncthing under the `syncthing` compose profile to enable local-first, serverless folder synchronization between the host's `/Users/tonyr/hermes` path and user devices (e.g. iPhone, other computers). Exposes standard sync protocol and local discovery ports.
+- **Self-Hosted Local Firecrawl**: Integrated a local Firecrawl API, Playwright microservice, and ephemeral Redis, Postgres, and RabbitMQ dependencies into the Docker stack to allow local web scraping without external API keys or cloud dependencies.
+- **RAG Indexing Optimizations & Bugfixes**:
+  - Truncated text inputs passed to the Hugging Face text-embeddings-inference (TEI) service to 10,000 characters to prevent `413 Payload Too Large` errors on massive files.
+  - Corrected environment variable casing bugs (`override_syncthing_enabled_set` -> `OVERRIDE_SYNCTHING_ENABLED_SET`) inside `rag-control.sh` that previously caused unbound variable startup crashes.
+
 ## 0.5.17 — 2026-05-31
 
 Fix MCP server configurations and environment isolation issues:
