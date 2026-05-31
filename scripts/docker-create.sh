@@ -256,6 +256,21 @@ default_mcp_servers = {
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-git"],
         "enabled": True
+    },
+    "yfinance": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-yfinance"],
+        "enabled": True
+    },
+    "puppeteer": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+        "enabled": True
+    },
+    "docker-manager": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-docker"],
+        "enabled": True
     }
 }
 
@@ -344,6 +359,10 @@ mount_args=(
   -v "${data_mount}"
   -v "${workspace_mount}"
 )
+
+if [[ -S "/var/run/docker.sock" || -e "/var/run/docker.sock" ]]; then
+  mount_args+=(-v "/var/run/docker.sock:/var/run/docker.sock")
+fi
 
 if [[ -n "${OBSIDIAN_SHARED_PATH}" ]]; then
   OBSIDIAN_SHARED_PATH="$(normalize_path "${OBSIDIAN_SHARED_PATH}")"
