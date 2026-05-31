@@ -127,31 +127,72 @@ def process_task(file_path):
         env={**os.environ, "HF_HOME": "/opt/data/.cache/huggingface"}
     )
     
+    # Setup directories
+    RESEARCHES_DIR = VAULT_DIR / "researches"
+    ARCHIVE_DIR = TASKS_DIR / "archive"
+
     # Update frontmatter and write response
     fm["completed_at"] = datetime.now().isoformat()
     
     if res.returncode == 0:
         fm["status"] = "completed"
         agent_response = res.stdout.strip()
-        timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
+        date_str = datetime.now().strftime("%Y-%m-%d")
         
-        # Append answer to body
-        updated_body = (
+        # Save detailed response to researches/
+        RESEARCHES_DIR.mkdir(parents=True, exist_ok=True)
+        research_file_name = f"{date_str}_{file_path.name}"
+        research_file_path = RESEARCHES_DIR / research_file_name
+        
+        research_content = (
+            f"# Research: {file_path.stem.replace('_', ' ').title()}\n"
+            f"**Date:** {date_str}\n\n"
+            f"## Request\n"
             f"{body}\n\n"
-            f"## Agent Response ({timestamp})\n\n"
-            f"{agent_response}"
+            f"---\n\n"
+            f"## Response\n\n"
+            f"{agent_response}\n"
         )
+        try:
+            research_file_path.write_text(research_content, encoding="utf-8")
+            # Point to the research file in frontmatter
+            fm["research_file"] = f"researches/{research_file_name}"
+        except Exception as e:
+            print(f"Failed to write research file: {e}")
+            fm["research_file_error"] = str(e)
+            
         print(f"Task completed successfully: {file_path.name}")
+        
+        # Write updated task file (with completed status)
+        try:
+            file_path.write_text(format_note(fm, body), encoding="utf-8")
+        except Exception as e:
+            print(f"Failed to write task file before archiving: {e}")
+            
+        # Move the task file to archive/
+        try:
+            ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+            archive_path = ARCHIVE_DIR / file_path.name
+            
+            # If a file already exists in archive, delete it to overwrite
+            if archive_path.exists():
+                archive_path.unlink()
+            
+            import shutil
+            shutil.move(str(file_path), str(archive_path))
+            print(f"Archived task: {file_path.name} -> {archive_path.name}")
+        except Exception as e:
+            print(f"Failed to archive task file: {e}")
+            
     else:
         fm["status"] = "failed"
         fm["error"] = res.stderr.strip() or res.stdout.strip() or f"Exit code {res.returncode}"
-        updated_body = body
         print(f"Task failed with error: {fm['error']}")
-
-    try:
-        file_path.write_text(format_note(fm, updated_body), encoding="utf-8")
-    except Exception as e:
-        print(f"Failed to write results back to note {file_path.name}: {e}")
+        
+        try:
+            file_path.write_text(format_note(fm, body), encoding="utf-8")
+        except Exception as e:
+            print(f"Failed to write failed status back to note {file_path.name}: {e}")
 
 def main():
     acquire_lock()
