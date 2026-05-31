@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.17 — 2026-05-31
+
+Fix MCP server configurations and environment isolation issues:
+
+- **yfinance Pydantic ValidationError Fix**: Resolved validation errors in the `yfinance` MCP server (`openmarkets`) by executing the server subprocess via `env -i -C /tmp HOME=/tmp` to isolate it from container environment variables and prevent loading `/opt/data/.env`.
+- **Puppeteer Headless Evasion**: Configured the environment variable `DOCKER_CONTAINER: "true"` inside the Puppeteer server `env` config block to force Chromium into headless and no-sandbox mode for unprivileged execution.
+- **Python MCP command correction**: Upgraded default server command templates in `docker-create.sh` to use `uvx` instead of `npx` for Python-based servers (`fetch`, `git`, `docker-manager`, and `yfinance`).
+
 ## 0.5.16 — 2026-05-31
 
 Fix Chromium path resolution and configuration merging for browser tools:
