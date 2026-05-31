@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.11 — 2026-05-31
+
+Integrated Obsidian Note-Driven Workflow:
+
+- **Background Watcher**: Added `obsidian-watcher.py` inside the container to continuously monitor the designated Obsidian vault folder (`_tasks/`) for new or pending notes (`status: pending` or not set).
+- **Oneshot Execution & Session Resumes**: Auto-executes notes using the Hermes CLI in oneshot mode, automatically resuming existing multi-turn chat sessions if `session` or `session_id` is defined in frontmatter.
+- **Bi-directional Sync**: Appends agent responses directly back to the Obsidian note and updates frontmatter metadata (`status: completed` and timestamps) to prevent reprocessing.
+
 ## 0.5.10 — 2026-05-31
 
 Integrated local offline Whisper speech-to-text (STT) support:

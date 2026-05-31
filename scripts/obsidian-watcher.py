@@ -119,7 +119,7 @@ def process_task(file_path):
         # Append answer to body
         updated_body = (
             f"{body}\n\n"
-            f"## Ответ агента ({timestamp})\n\n"
+            f"## Agent Response ({timestamp})\n\n"
             f"{agent_response}"
         )
         print(f"Task completed successfully: {file_path.name}")
