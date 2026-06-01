@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.22 — 2026-06-01
+
+Automate self-hosted n8n owner credentials provisioning:
+
+- **Automated Owner Account Creation**: Configured the self-hosted n8n service in `docker-compose.rag.yml` using `N8N_INSTANCE_OWNER_*` variables to automatically provision a local admin account on start. Bypasses the first-time setup wizard and avoids credentials lockout. Defaults to `admin@local.agent` / `admin123`.
+
 ## 0.5.21 — 2026-06-01
 
 Improve setup wizard quality of life, n8n API Key automation, and automated validation tests:
