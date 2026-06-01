@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.21 — 2026-06-01
+
+Improve setup wizard quality of life, n8n API Key automation, and automated validation tests:
+
+- **Non-Interactive Bypass Logic**: Enabled the setup wizard (`scripts/setup.sh`) to run fully non-interactively when options (e.g. agent runtime, LLM model, RAG, Syncthing, n8n) are already configured in the `.env` file. Bypasses terminal prompts and automatically selects safe non-blocking choices for port and stack conflict resolution.
+- **Dry-Run Validation Support**: Added a `--dry-run` (`-d`) flag to `setup.sh` to parse and validate configurations in CI or staging environments without spinning up Docker containers or macOS model server daemons.
+- **n8n API Key Setup Prompt**: Enhanced the setup wizard to detect if n8n is enabled and prompt the user to paste their generated n8n API key, falling back to a warning in non-interactive mode.
+- **Automated Validation Test Suite**: Introduced `scripts/test-wizard.sh` verifying all configurations, validation errors, and dry-run completions, hooked directly into local checks (`make ci-check`) and GitHub Actions CI workflow.
+
 ## 0.5.20 — 2026-06-01
 
 Integrate optional self-hosted n8n workflow engine and harden configurations:
