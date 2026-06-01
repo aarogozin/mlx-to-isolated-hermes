@@ -59,9 +59,9 @@ prompt() {
   local default="${2:-}"
   local answer
   if [[ -n "${default}" ]]; then
-    printf "${BOLD}  ?  %s${RESET} ${DIM}[%s]${RESET}: " "${text}" "${default}"
+    printf "${BOLD}  ?  %s${RESET} ${DIM}[%s]${RESET}: " "${text}" "${default}" >&2
   else
-    printf "${BOLD}  ?  %s${RESET}: " "${text}"
+    printf "${BOLD}  ?  %s${RESET}: " "${text}" >&2
   fi
   read -r answer
   printf '%s' "${answer:-${default}}"
@@ -70,9 +70,9 @@ prompt() {
 prompt_secret() {
   local text="$1"
   local answer
-  printf "${BOLD}  ?  %s${RESET}: " "${text}"
+  printf "${BOLD}  ?  %s${RESET}: " "${text}" >&2
   read -r -s answer
-  echo
+  echo >&2
   printf '%s' "${answer}"
 }
 
@@ -116,6 +116,18 @@ ensure_env_file() {
   if [[ ! -f "${ENV_FILE}" ]]; then
     [[ -f "${ENV_EXAMPLE}" ]] || die ".env.example not found — is PROJECT_ROOT correct?"
     cp "${ENV_EXAMPLE}" "${ENV_FILE}"
+  fi
+}
+
+repair_corrupted_env() {
+  if [[ -f "${ENV_FILE}" ]]; then
+    if grep -qE '(\x1b|\[1m|\?  |n8n API Key)' "${ENV_FILE}"; then
+      substep "Repairing corrupted ANSI entries in .env..."
+      local temp_env="${ENV_FILE}.tmp"
+      grep -vE '(\x1b|\[1m|\?  |n8n API Key)' "${ENV_FILE}" > "${temp_env}" || true
+      mv "${temp_env}" "${ENV_FILE}"
+      ok ".env file repaired (removed corrupted entries)"
+    fi
   fi
 }
 
@@ -1351,6 +1363,7 @@ main() {
 
   print_banner
   ensure_env_file
+  repair_corrupted_env
   PREVIOUS_AGENT_RUNTIME="$(env_get AGENT_RUNTIME)"
   PREVIOUS_SANDBOX_BACKEND="$(env_get SANDBOX_BACKEND)"
   detect_state
