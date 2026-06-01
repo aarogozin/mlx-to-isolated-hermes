@@ -56,6 +56,8 @@ ci-check:
 	SKIP_HOST_DOCTOR=1 SKIP_RAG_E2E=1 SKIP_DOCKER_E2E=1 ./scripts/release-check.sh
 	RAG_EMBEDDING_BACKEND=hash MATRIX_MODES=" " MATRIX_CLEAN_MODE=none MATRIX_REPORT_DIR=.runtime/matrix-e2e/ci-synthetic ./scripts/matrix-e2e.sh
 	./scripts/test-openclaw-docker-command-mock.sh
+	./scripts/test-wizard.sh
+
 
 matrix-e2e:
 	./scripts/matrix-e2e.sh

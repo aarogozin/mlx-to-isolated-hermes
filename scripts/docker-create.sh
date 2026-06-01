@@ -186,6 +186,7 @@ write_data_volume() {
     -e HERMES_YOLO_MODE="${HERMES_YOLO_MODE:-}" \
     -e BRAVE_API_KEY="${BRAVE_API_KEY}" \
     -e GITHUB_PERSONAL_ACCESS_TOKEN="${GITHUB_PERSONAL_ACCESS_TOKEN}" \
+    -e N8N_API_KEY="${N8N_API_KEY:-}" \
     -v "${SCRIPT_DIR}/rag-search-bridge.sh:/tmp/rag-search:ro" \
     -v "${data_mount}" \
     -v "${workspace_mount}" \
@@ -217,6 +218,7 @@ append_env_if_set GATEWAY_ALLOW_ALL_USERS "${GATEWAY_ALLOW_ALL_USERS}"
 append_env_if_set HERMES_YOLO_MODE "${HERMES_YOLO_MODE:-}"
 append_env_if_set BRAVE_API_KEY "${BRAVE_API_KEY}"
 append_env_if_set GITHUB_PERSONAL_ACCESS_TOKEN "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+append_env_if_set N8N_API_KEY "${N8N_API_KEY:-}"
 append_env_if_set OBSIDIAN_WATCH_INTERVAL_SECONDS "${OBSIDIAN_WATCH_INTERVAL_SECONDS:-}"
 /opt/hermes/.venv/bin/python3 -c '\''
 import yaml, sys
@@ -227,6 +229,7 @@ base_url = sys.argv[2]
 api_key = sys.argv[3]
 brave_key = sys.argv[4]
 github_token = sys.argv[5]
+n8n_key = sys.argv[6]
 
 config_path = Path("/opt/data/config.yaml")
 
@@ -285,6 +288,15 @@ default_mcp_servers = {
             "FIRECRAWL_API_URL": "http://host.docker.internal:3002"
         },
         "enabled": True
+    },
+    "n8n": {
+        "command": "npx",
+        "args": ["-y", "n8n-mcp"],
+        "env": {
+            "N8N_API_KEY": n8n_key,
+            "N8N_URL": "http://host.docker.internal:5678"
+        },
+        "enabled": bool(n8n_key)
     }
 }
 
@@ -355,12 +367,14 @@ if config_path.exists():
                 data["mcp_servers"][k]["enabled"] = bool(brave_key)
             elif k == "github":
                 data["mcp_servers"][k]["enabled"] = bool(github_token)
+            elif k == "n8n":
+                data["mcp_servers"][k]["enabled"] = bool(n8n_key)
 else:
     data = new_config
 
 with open(config_path, "w") as f:
     yaml.safe_dump(data, f, default_flow_style=False)
-'\'' "${MODEL_NAME}" "${OPENAI_BASE_URL}" "${OPENAI_API_KEY}" "${BRAVE_API_KEY:-}" "${GITHUB_PERSONAL_ACCESS_TOKEN:-}"
+'\'' "${MODEL_NAME}" "${OPENAI_BASE_URL}" "${OPENAI_API_KEY}" "${BRAVE_API_KEY:-}" "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" "${N8N_API_KEY:-}"
 install -m 0755 /tmp/rag-search /opt/data/.local/bin/rag-search
 mkdir -p /opt/data/skills/local-rag
 cat > /opt/data/skills/local-rag/SKILL.md <<'EOF'

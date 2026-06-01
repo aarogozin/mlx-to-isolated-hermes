@@ -20,6 +20,17 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 OMLX_HOME="${OMLX_HOME:-${PROJECT_ROOT}}"
 ENV_FILE="${OMLX_HOME}/.env"
 ENV_EXAMPLE="${PROJECT_ROOT}/.env.example"
+FORCE_PROMPTS=0
+DRY_RUN=0
+
+assert_interactive() {
+  local var_name="$1"
+  local description="$2"
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    die "Required setting '${var_name}' (${description}) is missing in .env, and setup is running in a non-interactive terminal."
+  fi
+}
+
 
 # ── Colour palette ────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -110,7 +121,9 @@ ensure_env_file() {
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 print_banner() {
-  clear
+  if [[ -t 1 && -n "${TERM:-}" ]]; then
+    clear
+  fi
   printf "${CYAN}${BOLD}"
   cat <<'BANNER'
 
@@ -178,7 +191,11 @@ run_bootstrap_if_needed() {
     return
   fi
   step "Installing prerequisites"
-  "${SCRIPT_DIR}/bootstrap-macos.sh"
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    info "[Dry-Run] Would run bootstrap-macos.sh"
+  else
+    "${SCRIPT_DIR}/bootstrap-macos.sh"
+  fi
   HAVE_BREW=1; HAVE_OMLX=1
 }
 
@@ -221,18 +238,27 @@ preflight_agent_state() {
     done
     
     local idx
-    idx="$(choose_menu "An agent stack currently exists in Docker. What would you like to do?" \
-      "Stop and remove existing agent stack(s) (recommended)" \
-      "Leave them as is and continue setup" \
-      "Abort setup")"
+    if [[ "${FORCE_PROMPTS}" -eq 0 ]]; then
+      idx=0
+      info "Non-interactive default: Stopping and removing existing agent stack(s)"
+    else
+      idx="$(choose_menu "An agent stack currently exists in Docker. What would you like to do?" \
+        "Stop and remove existing agent stack(s) (recommended)" \
+        "Leave them as is and continue setup" \
+        "Abort setup")"
+    fi
     case "${idx}" in
       0)
         substep "Stopping and removing agent stack(s)..."
         for r in "${active_records[@]}"; do
           local runtime="${r%%|*}"
           local name="$(printf '%s\n' "${r}" | cut -d'|' -f2)"
-          AGENT_RUNTIME="${runtime}" SANDBOX_BACKEND="docker" "${SCRIPT_DIR}/agent-control.sh" stop >/dev/null 2>&1 || true
-          docker rm -f "${name}" >/dev/null 2>&1 || true
+          if [[ "${DRY_RUN}" -eq 1 ]]; then
+            info "[Dry-Run] Would stop and remove existing agent stack: ${runtime} [Docker: ${name}]"
+          else
+            AGENT_RUNTIME="${runtime}" SANDBOX_BACKEND="docker" "${SCRIPT_DIR}/agent-control.sh" stop >/dev/null 2>&1 || true
+            docker rm -f "${name}" >/dev/null 2>&1 || true
+          fi
         done
         ok "Agent stack(s) stopped and removed"
         ;;
@@ -254,10 +280,15 @@ preflight_agent_state() {
     if [[ "${rag_status}" == *"rag=running"* ]]; then
       printf "\n"
       local rag_choice
-      rag_choice="$(choose_menu "RAG stack is currently running. What would you like to do?" \
-        "Keep the current RAG stack running (reuse)" \
-        "Restart/rebuild the RAG stack" \
-        "Stop RAG stack and continue setup without it")"
+      if [[ "${FORCE_PROMPTS}" -eq 0 ]]; then
+        rag_choice=0
+        info "Non-interactive default: Keeping current running RAG stack"
+      else
+        rag_choice="$(choose_menu "RAG stack is currently running. What would you like to do?" \
+          "Keep the current RAG stack running (reuse)" \
+          "Restart/rebuild the RAG stack" \
+          "Stop RAG stack and continue setup without it")"
+      fi
       case "${rag_choice}" in
         0)
           FORCE_RESTART_RAG=0
@@ -271,7 +302,11 @@ preflight_agent_state() {
           FORCE_RESTART_RAG=0
           RAG_SELECTED=0
           substep "Stopping RAG stack..."
-          RAG_ENABLED=1 "${SCRIPT_DIR}/rag-control.sh" stop >/dev/null 2>&1 || true
+          if [[ "${DRY_RUN}" -eq 1 ]]; then
+            info "[Dry-Run] Would stop RAG stack"
+          else
+            RAG_ENABLED=1 "${SCRIPT_DIR}/rag-control.sh" stop >/dev/null 2>&1 || true
+          fi
           ok "RAG stack stopped"
           ;;
       esac
@@ -295,6 +330,23 @@ choose_runtime() {
   if [[ -n "${current}" && "${current}" != "hermes" && "${current}" != "openclaw" ]]; then
     current=""
   fi
+
+  if [[ "${FORCE_PROMPTS}" -eq 0 && -n "${current}" ]]; then
+    AGENT_RUNTIME="${current}"
+    ensure_env_file
+    # Always lock in Docker as the backend
+    env_put SANDBOX_BACKEND "docker"
+    env_put TELEGRAM_TARGET "docker"
+    env_put DASHBOARD_TARGET "docker"
+    if [[ -z "$(env_get HERMES_DASHBOARD_TUI)" ]]; then
+      env_put HERMES_DASHBOARD_TUI "0"
+    fi
+    BACKEND="docker"
+    ok "Agent: ${AGENT_RUNTIME} (from .env)"
+    return
+  fi
+
+  assert_interactive "AGENT_RUNTIME" "agent runtime selection (hermes or openclaw)"
 
   step "Choose agent"
   printf "  ${DIM}Both agents run in Docker. Only one stack may be active at a time.${RESET}\n"
@@ -390,11 +442,16 @@ preflight_active_agent() {
 
   local idx
   if [[ "${other_active}" -eq 0 && "${same_active}" -eq 1 ]]; then
-    idx="$(choose_menu "The requested stack already exists. What should setup do?" \
-      "Reuse it and continue setup" \
-      "Stop and remove it to force recreate (recommended)" \
-      "Full clean-all reset before continuing" \
-      "Abort setup")"
+    if [[ "${FORCE_PROMPTS}" -eq 0 ]]; then
+      idx=1
+      info "Non-interactive default: Recreating agent stack container to apply configuration"
+    else
+      idx="$(choose_menu "The requested stack already exists. What should setup do?" \
+        "Reuse it and continue setup" \
+        "Stop and remove it to force recreate (recommended)" \
+        "Full clean-all reset before continuing" \
+        "Abort setup")"
+    fi
     case "${idx}" in
       0)
         SETUP_AGENT_CONFLICT_POLICY="prompt"
@@ -406,14 +463,22 @@ preflight_active_agent() {
         if [[ "${AGENT_RUNTIME}" == "openclaw" ]]; then
           container_name="${OPENCLAW_DOCKER_NAME:-omlx-agent-openclaw-docker}"
         fi
-        pause_detected_mode "${requested_mode}"
-        substep "Removing container '${container_name}' to force recreation..."
-        docker rm -f "${container_name}" >/dev/null 2>&1 || true
+        if [[ "${DRY_RUN}" -eq 1 ]]; then
+          info "[Dry-Run] Would stop/pause and remove container '${container_name}'"
+        else
+          pause_detected_mode "${requested_mode}"
+          substep "Removing container '${container_name}' to force recreation..."
+          docker rm -f "${container_name}" >/dev/null 2>&1 || true
+        fi
         SETUP_AGENT_CONFLICT_POLICY="prompt"
         ok "Active stack stopped and removed"
         ;;
       2)
-        FORCE=1 "${SCRIPT_DIR}/clean-all.sh"
+        if [[ "${DRY_RUN}" -eq 1 ]]; then
+          info "[Dry-Run] Would run clean-all.sh"
+        else
+          FORCE=1 "${SCRIPT_DIR}/clean-all.sh"
+        fi
         SETUP_AGENT_CONFLICT_POLICY="prompt"
         ok "Sandbox reset complete"
         ;;
@@ -424,11 +489,16 @@ preflight_active_agent() {
     return
   fi
 
-  idx="$(choose_menu "Another stack exists. What should setup do?" \
-    "Stop and remove conflicting stack(s) and continue" \
-    "Full clean-all reset before continuing" \
-    "Continue anyway without stopping anything" \
-    "Abort setup")"
+  if [[ "${FORCE_PROMPTS}" -eq 0 ]]; then
+    idx=0
+    info "Non-interactive default: Stopping conflicting agent stack(s)"
+  else
+    idx="$(choose_menu "Another stack exists. What should setup do?" \
+      "Stop and remove conflicting stack(s) and continue" \
+      "Full clean-all reset before continuing" \
+      "Continue anyway without stopping anything" \
+      "Abort setup")"
+  fi
   case "${idx}" in
     0)
       for record in "${active_records[@]}"; do
@@ -436,15 +506,23 @@ preflight_active_agent() {
         local name="$(printf '%s\n' "${record}" | cut -d'|' -f2)"
         local r_mode="${runtime}/docker"
         [[ "${runtime}" == "${AGENT_RUNTIME}" ]] && continue
-        pause_detected_mode "${r_mode}"
-        substep "Removing container '${name}'..."
-        docker rm -f "${name}" >/dev/null 2>&1 || true
+        if [[ "${DRY_RUN}" -eq 1 ]]; then
+          info "[Dry-Run] Would pause and remove conflicting container '${name}'"
+        else
+          pause_detected_mode "${r_mode}"
+          substep "Removing container '${name}'..."
+          docker rm -f "${name}" >/dev/null 2>&1 || true
+        fi
       done
       SETUP_AGENT_CONFLICT_POLICY="prompt"
       ok "Conflicting stack(s) stopped and removed"
       ;;
     1)
-      FORCE=1 "${SCRIPT_DIR}/clean-all.sh"
+      if [[ "${DRY_RUN}" -eq 1 ]]; then
+        info "[Dry-Run] Would run clean-all.sh"
+      else
+        FORCE=1 "${SCRIPT_DIR}/clean-all.sh"
+      fi
       SETUP_AGENT_CONFLICT_POLICY="prompt"
       ok "Sandbox reset complete"
       ;;
@@ -510,10 +588,15 @@ preflight_port_conflicts() {
 
   if [[ "${conflict_found}" -eq 1 ]]; then
     local idx
-    idx="$(choose_menu "Port conflicts detected. How should setup proceed?" \
-      "Attempt to kill conflicting host processes / stop Docker containers and continue" \
-      "Ignore and continue anyway (may fail to start)" \
-      "Abort setup")"
+    if [[ "${FORCE_PROMPTS}" -eq 0 ]]; then
+      idx=0
+      info "Non-interactive default: Attempting to clear port conflicts automatically"
+    else
+      idx="$(choose_menu "Port conflicts detected. How should setup proceed?" \
+        "Attempt to kill conflicting host processes / stop Docker containers and continue" \
+        "Ignore and continue anyway (may fail to start)" \
+        "Abort setup")"
+    fi
     case "${idx}" in
       0)
         for port in "${ports[@]}"; do
@@ -521,8 +604,12 @@ preflight_port_conflicts() {
           local container_name
           container_name="$(docker ps --filter "publish=${port}" --format '{{.Names}}' 2>/dev/null | head -n 1 || true)"
           if [[ -n "${container_name}" ]]; then
-            substep "Stopping container '${container_name}' occupying port ${port}..."
-            docker stop "${container_name}" >/dev/null 2>&1 || true
+            if [[ "${DRY_RUN}" -eq 1 ]]; then
+              info "[Dry-Run] Would stop container '${container_name}' occupying port ${port}"
+            else
+              substep "Stopping container '${container_name}' occupying port ${port}..."
+              docker stop "${container_name}" >/dev/null 2>&1 || true
+            fi
           fi
 
           # 2. Kill any host process occupying this port
@@ -539,24 +626,32 @@ preflight_port_conflicts() {
                 local label
                 label="$(launchctl list 2>/dev/null | grep -E "(^|[[:space:]])${pid}([[:space:]]|$)" | awk '{print $3}' || true)"
                 if [[ -n "${label}" ]]; then
-                  substep "Stopping launchd service '${label}' (PID: ${pid}) occupying port ${port}..."
-                  local plist_paths=(
-                    "${HOME}/Library/LaunchAgents/${label}.plist"
-                    "/Library/LaunchAgents/${label}.plist"
-                    "/Library/LaunchDaemons/${label}.plist"
-                  )
-                  for plist in "${plist_paths[@]}"; do
-                    if [[ -f "${plist}" ]]; then
-                      launchctl bootout "gui/$(id -u)" "${plist}" >/dev/null 2>&1 || \
-                      launchctl unload "${plist}" >/dev/null 2>&1 || true
-                      mv "${plist}" "${plist}.disabled" >/dev/null 2>&1 || true
-                    fi
-                  done
-                  launchctl remove "${label}" >/dev/null 2>&1 || true
+                  if [[ "${DRY_RUN}" -eq 1 ]]; then
+                    info "[Dry-Run] Would stop launchd service '${label}' (PID: ${pid}) occupying port ${port}"
+                  else
+                    substep "Stopping launchd service '${label}' (PID: ${pid}) occupying port ${port}..."
+                    local plist_paths=(
+                      "${HOME}/Library/LaunchAgents/${label}.plist"
+                      "/Library/LaunchAgents/${label}.plist"
+                      "/Library/LaunchDaemons/${label}.plist"
+                    )
+                    for plist in "${plist_paths[@]}"; do
+                      if [[ -f "${plist}" ]]; then
+                        launchctl bootout "gui/$(id -u)" "${plist}" >/dev/null 2>&1 || \
+                        launchctl unload "${plist}" >/dev/null 2>&1 || true
+                        mv "${plist}" "${plist}.disabled" >/dev/null 2>&1 || true
+                      fi
+                    done
+                    launchctl remove "${label}" >/dev/null 2>&1 || true
+                  fi
                 fi
 
-                substep "Killing process '${comm_base}' (PID: ${pid}) occupying port ${port}..."
-                kill -9 "${pid}" 2>/dev/null || true
+                if [[ "${DRY_RUN}" -eq 1 ]]; then
+                  info "[Dry-Run] Would kill process '${comm_base}' (PID: ${pid}) occupying port ${port}"
+                else
+                  substep "Killing process '${comm_base}' (PID: ${pid}) occupying port ${port}..."
+                  kill -9 "${pid}" 2>/dev/null || true
+                fi
               fi
             done
           fi
@@ -609,13 +704,17 @@ configure_credentials() {
   tg_token="$(env_get TELEGRAM_BOT_TOKEN)"
 
   if [[ -z "${tg_token}" ]]; then
-    printf "  ${DIM}Telegram lets you chat with the agent from your phone. Press Enter to skip.${RESET}\n"
-    tg_token="$(prompt "Telegram bot token (from @BotFather)")"
-    if [[ -n "${tg_token}" ]]; then
-      env_put TELEGRAM_BOT_TOKEN "${tg_token}"
-      ok "Telegram bot token saved"
+    if [[ "${FORCE_PROMPTS}" -eq 0 || ! -t 0 ]]; then
+      info "Telegram skipped — no bot token configured in .env"
     else
-      info "Telegram skipped — you can add TELEGRAM_BOT_TOKEN to .env later"
+      printf "  ${DIM}Telegram lets you chat with the agent from your phone. Press Enter to skip.${RESET}\n"
+      tg_token="$(prompt "Telegram bot token (from @BotFather)")"
+      if [[ -n "${tg_token}" ]]; then
+        env_put TELEGRAM_BOT_TOKEN "${tg_token}"
+        ok "Telegram bot token saved"
+      else
+        info "Telegram skipped — you can add TELEGRAM_BOT_TOKEN to .env later"
+      fi
     fi
   else
     ok "Telegram bot token already configured"
@@ -625,9 +724,11 @@ configure_credentials() {
     local tg_uid
     tg_uid="$(env_get TELEGRAM_USER_ID)"
     if [[ -z "${tg_uid}" ]]; then
-      printf "  ${DIM}Your numeric Telegram user ID (from @userinfobot) enables auto-approve. Optional.${RESET}\n"
-      tg_uid="$(prompt "Your Telegram user ID" "")"
-      [[ -n "${tg_uid}" ]] && env_put TELEGRAM_USER_ID "${tg_uid}" && ok "Telegram user ID: ${tg_uid}"
+      if [[ "${FORCE_PROMPTS}" -eq 1 && -t 0 ]]; then
+        printf "  ${DIM}Your numeric Telegram user ID (from @userinfobot) enables auto-approve. Optional.${RESET}\n"
+        tg_uid="$(prompt "Your Telegram user ID" "")"
+        [[ -n "${tg_uid}" ]] && env_put TELEGRAM_USER_ID "${tg_uid}" && ok "Telegram user ID: ${tg_uid}"
+      fi
     else
       ok "Telegram user ID: ${tg_uid}"
     fi
@@ -641,6 +742,19 @@ RAG_SMOKE_QUERY=""
 
 configure_model() {
   step "Model selection"
+
+  local current_model
+  current_model="$(env_get MODEL_NAME)"
+  if [[ "${FORCE_PROMPTS}" -eq 0 && -n "${current_model}" ]]; then
+    SELECTED_MODEL="${current_model}"
+    if [[ "${DRY_RUN}" -eq 0 ]]; then
+      MODEL="${SELECTED_MODEL}" "${SCRIPT_DIR}/models-sync-omlx.sh" > /dev/null 2>&1 || true
+    fi
+    ok "Model: ${SELECTED_MODEL} (from .env)"
+    return
+  fi
+
+  assert_interactive "MODEL_NAME" "local LLM model selection"
 
   info "Syncing LM Studio model catalog..."
   if ! "${SCRIPT_DIR}/models-sync-omlx.sh" >/dev/null 2>&1; then
@@ -677,7 +791,9 @@ configure_model() {
   choice="$(choose_menu "Select the model for ${AGENT_RUNTIME}:" "${model_labels[@]}")"
   SELECTED_MODEL="${model_ids[$choice]}"
 
-  MODEL="${SELECTED_MODEL}" "${SCRIPT_DIR}/models-sync-omlx.sh" > /dev/null 2>&1 || true
+  if [[ "${DRY_RUN}" -eq 0 ]]; then
+    MODEL="${SELECTED_MODEL}" "${SCRIPT_DIR}/models-sync-omlx.sh" > /dev/null 2>&1 || true
+  fi
   ok "Model: ${SELECTED_MODEL}"
 }
 
@@ -687,146 +803,273 @@ configure_rag() {
   printf "  ${DIM}RAG indexes your documents folder and makes it searchable by the agent.${RESET}\n"
   printf "  ${DIM}It runs fully locally in Docker and can be rebuilt from source at any time.${RESET}\n"
 
-  local idx
-  idx="$(choose_menu "Enable local RAG for this deployment?" \
-    "Yes — index my documents and connect RAG to the agent" \
-    "No  — skip RAG for now (can be enabled later with make rag-up)")"
-
-  if [[ "${idx}" -ne 0 ]]; then
-    RAG_SELECTED=0
-    env_put RAG_ENABLED "0"
-    info "RAG skipped — run 'make rag-up && make rag-index' to enable later"
-    return
-  fi
-
-  RAG_SELECTED=1
-  env_put RAG_ENABLED "1"
-  env_put RAG_RUNTIME "docker"
-  ok "RAG runtime: Docker"
-
-  [[ "${HAVE_DOCKER}" -eq 1 ]] || die "Docker Desktop is required for RAG. Start Docker Desktop first."
-
-  # ── RAG source path (documents library — RAG-only, read-only mount) ──
-  local rag_source_path
-  rag_source_path="$(env_get RAG_SOURCE_PATH)"
-  # Clear the placeholder expression if still unresolved
-  if [[ "${rag_source_path}" == '${OBSIDIAN_SHARED_PATH}' || "${rag_source_path}" == '${OBSIDIAN_SHARED_PATH:-}' ]]; then
-    rag_source_path=""
-  fi
-  # Fall back to OBSIDIAN_SHARED_PATH if RAG_SOURCE_PATH was not set independently
-  if [[ -z "${rag_source_path}" ]]; then
-    rag_source_path="$(env_get OBSIDIAN_SHARED_PATH)"
-  fi
-
-  if [[ -z "${rag_source_path}" ]]; then
-    printf "\n  ${BOLD}Documents folder for RAG${RESET}\n"
-    printf "  ${DIM}This folder will be indexed and made searchable via rag-search.\n"
-    printf "  Mounted read-only into the RAG container. PDFs, Word, spreadsheets,\n"
-    printf "  Markdown and plain text are all supported.${RESET}\n"
-    rag_source_path="$(prompt "Documents / vault path")"
-  fi
-
-  [[ -n "${rag_source_path}" ]] || die "RAG was selected but no source path was provided."
-  rag_source_path="${rag_source_path/#\~/${HOME}}"
-  [[ -d "${rag_source_path}" ]] || die "Path does not exist: ${rag_source_path}"
-  env_put RAG_SOURCE_PATH "${rag_source_path}"
-  ok "RAG source: ${rag_source_path}"
-
-  # ── Obsidian workspace (agent read-write mount) ──
-  local obsidian_path
-  obsidian_path="$(env_get OBSIDIAN_SHARED_PATH)"
-
-  if [[ -z "${obsidian_path}" ]]; then
-    printf "\n  ${BOLD}Agent workspace (Obsidian vault)${RESET}\n"
-    printf "  ${DIM}This folder is mounted read-write inside the agent container at /mnt/obsidian.\n"
-    printf "  The agent can read and create notes here directly.\n"
-    printf "  Press Enter to use the same folder as the documents source.${RESET}\n"
-    obsidian_path="$(prompt "Obsidian vault path (Enter = same as documents)" "")"
-  fi
-
-  if [[ -z "${obsidian_path}" ]]; then
-    obsidian_path="${rag_source_path}"
-    info "Agent workspace: same as RAG source (${obsidian_path})"
+  local rag_enabled
+  rag_enabled="$(env_get RAG_ENABLED)"
+  if [[ "${FORCE_PROMPTS}" -eq 0 && -n "${rag_enabled}" ]]; then
+    if [[ "${rag_enabled}" == "1" || "${rag_enabled}" == "true" ]]; then
+      RAG_SELECTED=1
+      ok "RAG: enabled (from .env)"
+    else
+      RAG_SELECTED=0
+      ok "RAG: disabled (from .env)"
+    fi
   else
-    obsidian_path="${obsidian_path/#\~/${HOME}}"
-    [[ -d "${obsidian_path}" ]] || die "Obsidian path does not exist: ${obsidian_path}"
-    ok "Agent workspace: ${obsidian_path}"
+    local idx
+    if [[ "${FORCE_PROMPTS}" -eq 0 ]]; then
+      # Non-interactive default when not set in .env
+      RAG_SELECTED=0
+      env_put RAG_ENABLED "0"
+      info "Non-interactive default: skipping RAG"
+    else
+      idx="$(choose_menu "Enable local RAG for this deployment?" \
+        "Yes — index my documents and connect RAG to the agent" \
+        "No  — skip RAG for now (can be enabled later with make rag-up)")"
+      if [[ "${idx}" -eq 0 ]]; then
+        RAG_SELECTED=1
+        env_put RAG_ENABLED "1"
+        env_put RAG_RUNTIME "docker"
+        ok "RAG runtime: Docker"
+      else
+        RAG_SELECTED=0
+        env_put RAG_ENABLED "0"
+        info "RAG skipped — run 'make rag-up && make rag-index' to enable later"
+      fi
+    fi
   fi
-  env_put OBSIDIAN_SHARED_PATH "${obsidian_path}"
 
   local rag_port
   rag_port="$(env_get RAG_PORT)"; rag_port="${rag_port:-8765}"
-  env_put RAG_PORT            "${rag_port}"
-  env_put RAG_BASE_URL        "http://127.0.0.1:${rag_port}"
-  env_put RAG_BASE_URL_GUEST  "http://rag-host.internal:${rag_port}"
-  env_put RAG_BASE_URL_DOCKER "http://rag-host.internal:${rag_port}"
-  env_put RAG_AUTO_INDEX "1"
-  [[ -n "$(env_get RAG_WATCH_INTERVAL_SECONDS)" ]] || env_put RAG_WATCH_INTERVAL_SECONDS "20"
-  [[ -n "$(env_get RAG_WATCH_DEBOUNCE_SECONDS)" ]] || env_put RAG_WATCH_DEBOUNCE_SECONDS "3"
+
+  if [[ "${RAG_SELECTED}" -eq 1 ]]; then
+    if [[ "${DRY_RUN}" -eq 0 ]]; then
+      [[ "${HAVE_DOCKER}" -eq 1 ]] || die "Docker Desktop is required for RAG. Start Docker Desktop first."
+    fi
+
+    # ── RAG source path (documents library) ──
+    local rag_source_path
+    rag_source_path="$(env_get RAG_SOURCE_PATH)"
+    if [[ "${rag_source_path}" == '${OBSIDIAN_SHARED_PATH}' || "${rag_source_path}" == '${OBSIDIAN_SHARED_PATH:-}' ]]; then
+      rag_source_path=""
+    fi
+    if [[ -z "${rag_source_path}" ]]; then
+      rag_source_path="$(env_get OBSIDIAN_SHARED_PATH)"
+    fi
+
+    if [[ "${FORCE_PROMPTS}" -eq 1 || -z "${rag_source_path}" ]]; then
+      assert_interactive "RAG_SOURCE_PATH" "path to documents / vault for RAG"
+      printf "\n  ${BOLD}Documents folder for RAG${RESET}\n"
+      printf "  ${DIM}This folder will be indexed and made searchable via rag-search.\n"
+      printf "  Mounted read-only into the RAG container. PDFs, Word, spreadsheets,\n"
+      printf "  Markdown and plain text are all supported.${RESET}\n"
+      rag_source_path="$(prompt "Documents / vault path")"
+    fi
+
+    [[ -n "${rag_source_path}" ]] || die "RAG was selected but no source path was provided."
+    rag_source_path="${rag_source_path/#\~/${HOME}}"
+    if [[ "${DRY_RUN}" -eq 0 ]]; then
+      [[ -d "${rag_source_path}" ]] || die "Path does not exist: ${rag_source_path}"
+    fi
+    env_put RAG_SOURCE_PATH "${rag_source_path}"
+    ok "RAG source: ${rag_source_path}"
+
+    # ── Obsidian workspace (agent read-write mount) ──
+    local obsidian_path
+    obsidian_path="$(env_get OBSIDIAN_SHARED_PATH)"
+
+    if [[ "${FORCE_PROMPTS}" -eq 1 || -z "${obsidian_path}" ]]; then
+      if [[ ! -t 0 || ! -t 1 ]]; then
+        obsidian_path="${rag_source_path}"
+      else
+        printf "\n  ${BOLD}Agent workspace (Obsidian vault)${RESET}\n"
+        printf "  ${DIM}This folder is mounted read-write inside the agent container at /mnt/obsidian.\n"
+        printf "  The agent can read and create notes here directly.\n"
+        printf "  Press Enter to use the same folder as the documents source.${RESET}\n"
+        obsidian_path="$(prompt "Obsidian vault path (Enter = same as documents)" "")"
+      fi
+    fi
+
+    if [[ -z "${obsidian_path}" ]]; then
+      obsidian_path="${rag_source_path}"
+      info "Agent workspace: same as RAG source (${obsidian_path})"
+    else
+      obsidian_path="${obsidian_path/#\~/${HOME}}"
+      if [[ "${DRY_RUN}" -eq 0 ]]; then
+        [[ -d "${obsidian_path}" ]] || die "Obsidian path does not exist: ${obsidian_path}"
+      fi
+      ok "Agent workspace: ${obsidian_path}"
+    fi
+    env_put OBSIDIAN_SHARED_PATH "${obsidian_path}"
+
+    env_put RAG_PORT            "${rag_port}"
+    env_put RAG_BASE_URL        "http://127.0.0.1:${rag_port}"
+    env_put RAG_BASE_URL_GUEST  "http://rag-host.internal:${rag_port}"
+    env_put RAG_BASE_URL_DOCKER "http://rag-host.internal:${rag_port}"
+    env_put RAG_AUTO_INDEX "1"
+    [[ -n "$(env_get RAG_WATCH_INTERVAL_SECONDS)" ]] || env_put RAG_WATCH_INTERVAL_SECONDS "20"
+    [[ -n "$(env_get RAG_WATCH_DEBOUNCE_SECONDS)" ]] || env_put RAG_WATCH_DEBOUNCE_SECONDS "3"
+  fi
 
   # ── Optional Services: Syncthing ──
-  printf "\n  ${BOLD}Optional Service: Syncthing File Synchronization${RESET}\n"
-  local sync_opt
-  sync_opt="$(choose_menu "Enable Syncthing for peer-to-peer file synchronization?" \
-    "No  — skip Syncthing (default)" \
-    "Yes — enable Syncthing and sync documents/Obsidian")"
-  if [[ "${sync_opt}" -eq 1 ]]; then
-    env_put SYNCTHING_ENABLED "1"
+  local syncthing_enabled
+  syncthing_enabled="$(env_get SYNCTHING_ENABLED)"
+  local run_syncthing=0
+
+  if [[ "${FORCE_PROMPTS}" -eq 0 && -n "${syncthing_enabled}" ]]; then
+    if [[ "${syncthing_enabled}" == "1" || "${syncthing_enabled}" == "true" ]]; then
+      run_syncthing=1
+      ok "Syncthing: enabled (from .env)"
+    else
+      run_syncthing=0
+      ok "Syncthing: disabled (from .env)"
+    fi
+  else
+    if [[ "${FORCE_PROMPTS}" -eq 0 ]]; then
+      run_syncthing=0
+      env_put SYNCTHING_ENABLED "0"
+      info "Non-interactive default: Syncthing disabled"
+    else
+      printf "\n  ${BOLD}Optional Service: Syncthing File Synchronization${RESET}\n"
+      local sync_opt
+      sync_opt="$(choose_menu "Enable Syncthing for peer-to-peer file synchronization?" \
+        "No  — skip Syncthing (default)" \
+        "Yes — enable Syncthing and sync documents/Obsidian")"
+      if [[ "${sync_opt}" -eq 1 ]]; then
+        run_syncthing=1
+        env_put SYNCTHING_ENABLED "1"
+      else
+        run_syncthing=0
+        env_put SYNCTHING_ENABLED "0"
+      fi
+    fi
+  fi
+
+  if [[ "${run_syncthing}" -eq 1 ]]; then
     local sync_path
     sync_path="$(env_get SYNCTHING_SYNC_PATH)"
     if [[ -z "${sync_path}" ]]; then
       sync_path="/Users/tonyr/hermes"
     fi
     env_put SYNCTHING_SYNC_PATH "${sync_path}"
-    ok "Syncthing enabled (sync path: ${sync_path})"
+    ok "Syncthing sync path: ${sync_path}"
   else
-    env_put SYNCTHING_ENABLED "0"
     ok "Syncthing disabled"
   fi
 
   # ── Optional Services: n8n ──
-  printf "\n  ${BOLD}Optional Service: n8n Workflow Automation${RESET}\n"
-  local n8n_opt
-  n8n_opt="$(choose_menu "Enable n8n self-hosted workflow automation?" \
-    "No  — skip n8n (default, recommended to save resources)" \
-    "Yes — enable n8n and connect tools via MCP")"
-  if [[ "${n8n_opt}" -eq 1 ]]; then
-    env_put N8N_ENABLED "1"
-    ok "n8n enabled (port: 5678)"
+  local n8n_enabled
+  n8n_enabled="$(env_get N8N_ENABLED)"
+  local run_n8n=0
+
+  if [[ "${FORCE_PROMPTS}" -eq 0 && -n "${n8n_enabled}" ]]; then
+    if [[ "${n8n_enabled}" == "1" || "${n8n_enabled}" == "true" ]]; then
+      run_n8n=1
+      ok "n8n: enabled (from .env)"
+    else
+      run_n8n=0
+      ok "n8n: disabled (from .env)"
+    fi
   else
-    env_put N8N_ENABLED "0"
+    if [[ "${FORCE_PROMPTS}" -eq 0 ]]; then
+      run_n8n=0
+      env_put N8N_ENABLED "0"
+      info "Non-interactive default: n8n disabled"
+    else
+      printf "\n  ${BOLD}Optional Service: n8n Workflow Automation${RESET}\n"
+      local n8n_opt
+      n8n_opt="$(choose_menu "Enable n8n self-hosted workflow automation?" \
+        "No  — skip n8n (default, recommended to save resources)" \
+        "Yes — enable n8n and connect tools via MCP")"
+      if [[ "${n8n_opt}" -eq 1 ]]; then
+        run_n8n=1
+        env_put N8N_ENABLED "1"
+      else
+        run_n8n=0
+        env_put N8N_ENABLED "0"
+      fi
+    fi
+  fi
+
+  if [[ "${run_n8n}" -eq 1 ]]; then
+    ok "n8n enabled (port: 5678)"
+
+    # Check for n8n API Key
+    local n8n_api_key
+    n8n_api_key="$(env_get N8N_API_KEY)"
+
+    if [[ -z "${n8n_api_key}" ]]; then
+      if [[ ! -t 0 || ! -t 1 ]]; then
+        warn "N8N_API_KEY is empty in .env. n8n tool integration is disabled."
+      else
+        printf "\n  ${BOLD}n8n API Key Setup${RESET}\n"
+        printf "  ${DIM}n8n is enabled, but N8N_API_KEY is not configured in .env.\n"
+        printf "  To connect the agent to n8n workflows via MCP, you must generate an API key:\n"
+        printf "  1. Open n8n in your browser: http://127.0.0.1:5678 (after setup finishes)\n"
+        printf "  2. Complete the owner account setup.\n"
+        printf "  3. Go to Settings -> API Keys (or n8n API) and generate a key.\n"
+        printf "  4. Paste the key here, or press Enter to skip and configure it later.${RESET}\n"
+        n8n_api_key="$(prompt "n8n API Key" "")"
+        if [[ -n "${n8n_api_key}" ]]; then
+          env_put N8N_API_KEY "${n8n_api_key}"
+          ok "n8n API Key configured"
+        else
+          warn "n8n API Key is empty. The agent's n8n MCP tool integration will remain disabled."
+        fi
+      fi
+    else
+      ok "n8n API Key: configured"
+    fi
+  else
     ok "n8n disabled"
   fi
 
-  if [[ "${FORCE_RESTART_RAG:-1}" -eq 1 ]]; then
-    substep "Installing RAG dependencies..."
-    "${SCRIPT_DIR}/rag-control.sh" install
+  # Deployment execution (skipped in dry-run)
+  if [[ "${RAG_SELECTED}" -eq 1 ]]; then
+    if [[ "${FORCE_RESTART_RAG:-1}" -eq 1 ]]; then
+      substep "Installing RAG dependencies..."
+      if [[ "${DRY_RUN}" -eq 1 ]]; then
+        info "[Dry-Run] Would run rag-control.sh install"
+      else
+        "${SCRIPT_DIR}/rag-control.sh" install
+      fi
 
-    substep "Starting RAG containers (Qdrant, Tika, Docling, API)..."
-    "${SCRIPT_DIR}/rag-control.sh" start
+      substep "Starting RAG containers (Qdrant, Tika, Docling, API)..."
+      if [[ "${DRY_RUN}" -eq 1 ]]; then
+        info "[Dry-Run] Would run rag-control.sh start"
+      else
+        "${SCRIPT_DIR}/rag-control.sh" start
+      fi
 
-    substep "Starting background indexing..."
-    local log_file="${OMLX_HOME}/.runtime/rag-docker/rag-index.log"
-    mkdir -p "$(dirname "${log_file}")"
-    nohup "${SCRIPT_DIR}/rag-control.sh" index > "${log_file}" 2>&1 &
-    info "Indexing in background — check progress: make rag-index-status"
-  else
-    ok "Reusing already running RAG stack"
-  fi
-
-  substep "Verifying RAG API is reachable..."
-  local attempts=5 i api_online=0
-  for ((i=1; i<=attempts; i++)); do
-    if curl -fsS --max-time 2 "http://127.0.0.1:${rag_port}/health" > /dev/null 2>&1; then
-      api_online=1
-      break
+      substep "Starting background indexing..."
+      local log_file="${OMLX_HOME}/.runtime/rag-docker/rag-index.log"
+      mkdir -p "$(dirname "${log_file}")"
+      if [[ "${DRY_RUN}" -eq 1 ]]; then
+        info "[Dry-Run] Would start indexing in background"
+      else
+        nohup "${SCRIPT_DIR}/rag-control.sh" index > "${log_file}" 2>&1 &
+      fi
+      info "Indexing in background — check progress: make rag-index-status"
+    else
+      ok "Reusing already running RAG stack"
     fi
-    sleep 1
-  done
-  if [[ "${api_online}" -eq 1 ]]; then
-    ok "RAG API online at http://127.0.0.1:${rag_port}"
-  else
-    warn "RAG API not yet responding — containers may still be starting. Check: make rag-status"
+
+    substep "Verifying RAG API is reachable..."
+    if [[ "${DRY_RUN}" -eq 1 ]]; then
+      ok "[Dry-Run] Mocked RAG API online check"
+    else
+      local attempts=5 i api_online=0
+      for ((i=1; i<=attempts; i++)); do
+        if curl -fsS --max-time 2 "http://127.0.0.1:${rag_port}/health" > /dev/null 2>&1; then
+          api_online=1
+          break
+        fi
+        sleep 1
+      done
+      if [[ "${api_online}" -eq 1 ]]; then
+        ok "RAG API online at http://127.0.0.1:${rag_port}"
+      else
+        warn "RAG API not yet responding — containers may still be starting. Check: make rag-status"
+      fi
+    fi
   fi
 }
 
@@ -837,6 +1080,11 @@ start_omlx() {
     info "oMLX already running — skipping"
     return
   fi
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    info "[Dry-Run] Would start oMLX model server (background, launchd)"
+    OMLX_RUNNING=1
+    return
+  fi
   "${SCRIPT_DIR}/model-start-omlx-bg.sh"
   OMLX_RUNNING=1
   ok "oMLX started"
@@ -845,6 +1093,11 @@ start_omlx() {
 # ── Step 8: Create sandbox ────────────────────────────────────────────────────
 create_sandbox() {
   step "Starting selected agent stack"
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    info "[Dry-Run] Would start selected agent stack via agent-control.sh"
+    ok "Agent stack ready"
+    return
+  fi
   if ! AGENT_RUNTIME="${AGENT_RUNTIME}" SANDBOX_BACKEND="${BACKEND}" AGENT_CONFLICT_POLICY="${SETUP_AGENT_CONFLICT_POLICY}" "${SCRIPT_DIR}/agent-control.sh" start; then
     [[ -n "${PREVIOUS_AGENT_RUNTIME}" ]] && env_put AGENT_RUNTIME "${PREVIOUS_AGENT_RUNTIME}"
     [[ -n "${PREVIOUS_SANDBOX_BACKEND}" ]] && env_put SANDBOX_BACKEND "${PREVIOUS_SANDBOX_BACKEND}"
@@ -857,6 +1110,10 @@ verify_rag_after_deploy() {
   [[ "${RAG_SELECTED}" -eq 1 ]] || return 0
 
   step "Verifying RAG inside sandbox"
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    ok "[Dry-Run] Verified RAG inside sandbox reachable"
+    return 0
+  fi
   local rag_port
   rag_port="$(env_get RAG_PORT)"; rag_port="${rag_port:-8765}"
   local health_output=""
@@ -939,6 +1196,11 @@ verify_telegram() {
   [[ -n "${tg_token}" ]] || return 0
 
   info "Verifying Telegram bot connectivity..."
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    ok "[Dry-Run] Telegram bot connectivity check mocked"
+    TELEGRAM_REACHABLE=1
+    return 0
+  fi
   local response
   response="$(curl -fsS --max-time 6 \
     "https://api.telegram.org/bot${tg_token}/getMe" 2>/dev/null || true)"
@@ -1048,7 +1310,7 @@ DONE
   printf "\n"
 
   # ── Auto-open dashboard in browser ──
-  if command -v open > /dev/null 2>&1; then
+  if [[ "${DRY_RUN}" -eq 0 ]] && command -v open > /dev/null 2>&1; then
     open "${DASHBOARD_URL}"
   fi
 
@@ -1056,7 +1318,11 @@ DONE
   if [[ "${RAG_SELECTED:-0}" -eq 1 ]]; then
     printf "\n"
     printf "  ${BOLD}RAG indexing status:${RESET}\n"
-    "${SCRIPT_DIR}/rag-control.sh" index-status 2>/dev/null | sed 's/^/  /' || true
+    if [[ "${DRY_RUN}" -eq 1 ]]; then
+      info "[Dry-Run] RAG indexing status mocked"
+    else
+      "${SCRIPT_DIR}/rag-control.sh" index-status 2>/dev/null | sed 's/^/  /' || true
+    fi
     if [[ -n "${OMLX_CLI:-}" ]]; then
       printf "  ${DIM}  Run 'omlx-agent status' any time to refresh RAG / stack status.${RESET}\n"
     else
@@ -1067,9 +1333,21 @@ DONE
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 main() {
-  if [[ ! -t 0 || ! -t 1 ]]; then
-    die "setup.sh must be run in an interactive terminal."
-  fi
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -f|--force)
+        FORCE_PROMPTS=1
+        shift
+        ;;
+      -d|--dry-run)
+        DRY_RUN=1
+        shift
+        ;;
+      *)
+        die "Unknown argument: $1"
+        ;;
+    esac
+  done
 
   print_banner
   ensure_env_file

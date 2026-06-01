@@ -54,6 +54,10 @@ jobs:
       - name: OpenClaw Docker command mock
         run: scripts/test-openclaw-docker-command-mock.sh
 
+      - name: Setup Wizard dry-run tests
+        run: scripts/test-wizard.sh
+
+
   docker:
     name: Docker checks
     runs-on: ubuntu-latest
