@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.20 — 2026-06-01
+
+Integrate optional self-hosted n8n workflow engine and harden configurations:
+
+- **Optional n8n Integration**: Deployed n8n under the `n8n` compose profile in `docker-compose.rag.yml`. Configured database persistence using SQLite inside a named Docker volume (`rag-n8n-data`), avoiding resource overhead from external databases.
+- **Granular Setup Wizard**: Updated the interactive setup wizard (`scripts/setup.sh`) to allow users to selectively enable/disable n8n during first-time configuration, keeping n8n fully optional and disabled by default.
+- **Security Hardening**: Locked down the local n8n container port (`5678`) to the loopback interface (`127.0.0.1`) and disabled telemetry diagnostics data sharing (`N8N_DIAGNOSTICS_ENABLED=false`) inside the container environment block.
+- **n8n MCP Guide**: Wrote a detailed guide (`docs/n8n_mcp_guide.md`) mapping out trigger settings (MCP Server Trigger node) and showing how to connect n8n workflows to the AI agent.
+
 ## 0.5.19 — 2026-05-31
 
 Automate folder configuration inside Syncthing:
