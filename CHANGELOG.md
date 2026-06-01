@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.23 — 2026-06-01
+
+Fix setup wizard prompt UI output leakage and add configuration auto-healing:
+
+- **Stderr Redirection for Prompt UIs**: Redirected all prompt question prints and secret entry echo lines inside `setup.sh` to `stderr` (`>&2`). This stops `$(prompt ...)` command substitutions from capturing ANSI escape color codes and text prompts, ensuring only the raw user input is assigned to variables.
+- **Auto-Healing Env Routine**: Added a `repair_corrupted_env` routine executing on setup start. It automatically checks `.env` and cleans up any corrupted variables containing raw ANSI escape sequences (e.g. `\x1b` or `[1m` patterns), restoring the config file to a healthy state.
+
 ## 0.5.22 — 2026-06-01
 
 Automate self-hosted n8n owner credentials provisioning:
