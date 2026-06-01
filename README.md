@@ -8,7 +8,7 @@ serves them through an OpenAI-compatible API, and an optional RAG service
 indexes your documents. The agent runs in Docker with its data visible on the
 host filesystem.
 
-**Version:** `0.5.17`
+**Version:** `0.5.20`
 
 ---
 
@@ -16,16 +16,16 @@ host filesystem.
 
 ```bash
 make bootstrap        # install Homebrew, oMLX, Docker check
-make setup            # interactive wizard — 2 questions
+make setup            # interactive wizard
 make agent-status
 make agent-open-dashboard
 ```
 
-`make setup` asks exactly two things:
+`make setup` is an interactive wizard that configures:
 
-1. **Which agent?** Hermes (conversational, Telegram + web dashboard) or
-   OpenClaw (browser-use, control UI)
+1. **Which agent?** Hermes (conversational, Telegram + web dashboard) or OpenClaw (browser-use, control UI)
 2. **Enable RAG?** Index a local documents folder for semantic search
+3. **Optional Services:** Enable/configure Syncthing (P2P synchronization) and n8n (self-hosted workflow automation)
 
 Everything else — Docker backend, API key, base URLs — is set automatically.
 
@@ -48,7 +48,9 @@ Docker containers
     ├── qdrant        vector storage
     ├── tika          document parsing
     ├── docling       advanced PDF/image conversion
-    └── rag-api       FastAPI search endpoint
+    ├── rag-api       FastAPI search endpoint
+    ├── syncthing     P2P folder sync (optional) → :8384 / :22000
+    └── n8n           workflow automation (optional) → :5678
 ```
 
 Inference stays on the Mac. The agent container is where tools run, files
@@ -140,8 +142,10 @@ If a research task gets stuck, goes into a loop, or you simply want to cancel it
 | Documents for RAG indexing | Host: your folder → `/source` (ro, RAG only) | `RAG_SOURCE_PATH` |
 | RAG vector index (Qdrant) | **Docker volume** `mlx-isolated-rag_rag-qdrant` | — |
 | RAG Python venv | Docker volume `mlx-isolated-rag_rag-api-venv` | — |
+| Syncthing configuration | Docker volume `rag-syncthing-config` | — |
+| n8n databases / workflows | Docker volume `rag-n8n-data` | — |
 
-Agent data is bind-mounted so files are visible on the host. RAG index and
+Agent data is bind-mounted so files are visible on the host. RAG index, optional services configuration, and
 Python dependencies live in Docker named volumes — they survive `make rag-down`
 and are not polluting your project directory.
 
@@ -239,6 +243,26 @@ The Hermes web dashboard is available at `http://127.0.0.1:9120` by default
 as soon as the container starts — no SSH tunnel needed.
 
 Remote access via Cloudflare Tunnel is opt-in. See [docs/REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md).
+
+---
+
+## Optional Stack Services
+
+The Docker stack includes optional orchestration profiles to extend capabilities without bloating the main service footprint.
+
+### 1. Syncthing (P2P File Synchronization)
+* **Purpose**: Sync your active documents and Obsidian vault between your Mac host and mobile devices (e.g. iPhone) or other computers securely without using third-party cloud servers.
+* **Enable**: Set `SYNCTHING_ENABLED=1` in `.env` and restart via `make rag-down && make rag-up`.
+* **Ports**: Web GUI is exposed on `http://127.0.0.1:8384`. Sync protocol ports `22000` (TCP/UDP) and discovery port `21027` (UDP) are open to allow direct connections.
+* **Auto-configuration**: The startup process automatically generates the `.stfolder` marker and configures the `hermes` sync folder pointing to your host path `/Users/tonyr/hermes/`.
+* **iOS/Android Clients**: Use **Möbius Sync** on iOS or the official **Syncthing** client on Android.
+
+### 2. n8n (Workflow Automation & MCP Server)
+* **Purpose**: Create visual, node-based automation workflows connecting hundreds of web apps and APIs, exposing them as custom tools that your agent can trigger dynamically.
+* **Enable**: Set `N8N_ENABLED=1` in `.env` and restart via `make rag-down && make rag-up`.
+* **Ports**: Dashboard is exposed on `http://127.0.0.1:5678` (secured to loopback).
+* **MCP Integration**: Use the native **MCP Server Trigger** node inside n8n workflows to convert any workflow into a tool the agent can call over HTTP/SSE.
+* **Guide**: See [docs/n8n_mcp_guide.md](docs/n8n_mcp_guide.md) for step-by-step setup.
 
 ---
 
