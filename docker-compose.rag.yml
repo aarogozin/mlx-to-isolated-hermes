@@ -222,6 +222,9 @@ services:
       - WEBHOOK_URL=http://${N8N_HOST:-localhost}:${N8N_PORT:-5678}/
       - GENERIC_TIMEZONE=${N8N_TIMEZONE:-Europe/Berlin}
       - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_INSTANCE_OWNER_MANAGED_BY_ENV=${N8N_INSTANCE_OWNER_MANAGED_BY_ENV:-true}
+      - N8N_INSTANCE_OWNER_EMAIL=${N8N_INSTANCE_OWNER_EMAIL:-admin@local.agent}
+      - N8N_INSTANCE_OWNER_PASSWORD_HASH=${N8N_INSTANCE_OWNER_PASSWORD_HASH:-$$2b$$10$$Dhm1nxywuRqjTkN6ZW8rKO8GsaIgxpfKy6xYakYv9lPHiwvusu7Rm}
     volumes:
       - rag-n8n-data:/home/node/.n8n
     profiles: ["n8n"]
