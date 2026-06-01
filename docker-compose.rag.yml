@@ -209,6 +209,22 @@ services:
       - "21027:21027/udp"
     profiles: ["syncthing"]
 
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: mlx-n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_BIND_HOST:-127.0.0.1}:${N8N_PORT:-5678}:5678"
+    environment:
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://${N8N_HOST:-localhost}:${N8N_PORT:-5678}/
+      - GENERIC_TIMEZONE=${N8N_TIMEZONE:-Europe/Berlin}
+    volumes:
+      - rag-n8n-data:/home/node/.n8n
+    profiles: ["n8n"]
+
 # Named Docker volumes — managed by Docker, survive make rag-down / rag-up.
 # To wipe and reindex from scratch: docker volume rm mlx-isolated-rag_rag-qdrant
 volumes:
@@ -216,4 +232,5 @@ volumes:
   rag-api-venv:
   rag-cache:
   rag-syncthing-config:
+  rag-n8n-data:
 

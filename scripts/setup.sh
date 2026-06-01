@@ -764,6 +764,40 @@ configure_rag() {
   [[ -n "$(env_get RAG_WATCH_INTERVAL_SECONDS)" ]] || env_put RAG_WATCH_INTERVAL_SECONDS "20"
   [[ -n "$(env_get RAG_WATCH_DEBOUNCE_SECONDS)" ]] || env_put RAG_WATCH_DEBOUNCE_SECONDS "3"
 
+  # ── Optional Services: Syncthing ──
+  printf "\n  ${BOLD}Optional Service: Syncthing File Synchronization${RESET}\n"
+  local sync_opt
+  sync_opt="$(choose_menu "Enable Syncthing for peer-to-peer file synchronization?" \
+    "No  — skip Syncthing (default)" \
+    "Yes — enable Syncthing and sync documents/Obsidian")"
+  if [[ "${sync_opt}" -eq 1 ]]; then
+    env_put SYNCTHING_ENABLED "1"
+    local sync_path
+    sync_path="$(env_get SYNCTHING_SYNC_PATH)"
+    if [[ -z "${sync_path}" ]]; then
+      sync_path="/Users/tonyr/hermes"
+    fi
+    env_put SYNCTHING_SYNC_PATH "${sync_path}"
+    ok "Syncthing enabled (sync path: ${sync_path})"
+  else
+    env_put SYNCTHING_ENABLED "0"
+    ok "Syncthing disabled"
+  fi
+
+  # ── Optional Services: n8n ──
+  printf "\n  ${BOLD}Optional Service: n8n Workflow Automation${RESET}\n"
+  local n8n_opt
+  n8n_opt="$(choose_menu "Enable n8n self-hosted workflow automation?" \
+    "No  — skip n8n (default, recommended to save resources)" \
+    "Yes — enable n8n and connect tools via MCP")"
+  if [[ "${n8n_opt}" -eq 1 ]]; then
+    env_put N8N_ENABLED "1"
+    ok "n8n enabled (port: 5678)"
+  else
+    env_put N8N_ENABLED "0"
+    ok "n8n disabled"
+  fi
+
   if [[ "${FORCE_RESTART_RAG:-1}" -eq 1 ]]; then
     substep "Installing RAG dependencies..."
     "${SCRIPT_DIR}/rag-control.sh" install
