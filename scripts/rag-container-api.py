@@ -9,6 +9,8 @@ import json
 import mimetypes
 import os
 import sys
+import threading
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +19,9 @@ from typing import Any
 import requests
 from fastapi import FastAPI, HTTPException, Request
 from qdrant_client import QdrantClient, models
+
+# Global lock: prevents concurrent indexing runs (watcher thread vs. /index API)
+_index_lock = threading.Lock()
 
 
 TEXT_EXTENSIONS = {
@@ -314,8 +319,8 @@ def tei_embeddings(texts: list[str]) -> list[list[float]]:
                 data = response.json().get("data", [])
                 results.extend([item["embedding"] for item in data])
                 continue
-        except Exception:
-            pass
+        except Exception as _tei_exc:
+            print(f"Warning: primary TEI /v1/embeddings failed ({_tei_exc}), trying /embed fallback", flush=True)
         response = requests.post(base + "/embed", json={"inputs": batch}, timeout=180)
         response.raise_for_status()
         payload = response.json()
@@ -333,16 +338,51 @@ def embed(texts: list[str]) -> list[list[float]]:
     return tei_embeddings(texts)
 
 
-def ensure_collection(vector_size: int) -> None:
-    client = qdrant()
-    name = collection_name()
-    existing = [collection.name for collection in client.get_collections().collections]
-    if name in existing:
-        client.delete_collection(name)
-    client.create_collection(
-        collection_name=name,
-        vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
+def load_manifest() -> dict[str, Any]:
+    path = Path(env("RAG_MANIFEST_PATH", "/cache/rag-manifest.json"))
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"documents": {}, "table_schema_version": 1}
+
+
+def save_manifest(manifest: dict[str, Any]) -> None:
+    path = Path(env("RAG_MANIFEST_PATH", "/cache/rag-manifest.json"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        print(f"Warning: Failed to save manifest: {exc}", flush=True)
+
+
+def delete_document(client: QdrantClient, rel: str) -> None:
+    client.delete(
+        collection_name=collection_name(),
+        points_selector=models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="path",
+                    match=models.MatchValue(value=rel),
+                )
+            ]
+        ),
+        wait=True
     )
+
+
+def ensure_collection(client: QdrantClient, vector_size: int) -> None:
+    """Create the Qdrant collection if it does not exist, reusing the provided client."""
+    name = collection_name()
+    existing = [col.name for col in client.get_collections().collections]
+    if name not in existing:
+        client.create_collection(
+            collection_name=name,
+            vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
+        )
 
 
 def scan_files() -> list[Path]:
@@ -391,48 +431,136 @@ def index_documents() -> dict[str, Any]:
     errors: list[dict[str, str]] = []
     files = scan_files()
     total = len(files)
-    print(f"Starting indexing for {total} files.", flush=True)
+    
+    client = qdrant()
+    name = collection_name()
+    existing = [collection.name for collection in client.get_collections().collections]
+    
+    manifest = load_manifest()
+    
+    # Recreate collection if schemas or parameters change
+    model_changed = manifest.get("embedding_model") != env("RAG_EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
+    backend_changed = manifest.get("embedding_backend") != env("RAG_DOCKER_EMBEDDING_BACKEND", "tei")
+    recreate = (name not in existing) or model_changed or backend_changed
+    
+    if recreate:
+        print(f"Recreating Qdrant collection '{name}'...", flush=True)
+        if name in existing:
+            client.delete_collection(name)
+        collection_initialized = False
+        manifest["documents"] = {}
+    else:
+        collection_initialized = True
+
+    documents = manifest.setdefault("documents", {})
+    seen: set[str] = set()
+    changed = 0
+    skipped = 0
     chunks_written = 0
-    collection_initialized = False
+
+    print(f"Starting indexing for {total} files.", flush=True)
 
     for idx, path in enumerate(files, 1):
         rel = path.relative_to(source_path()).as_posix()
+        seen.add(rel)
+        digest = file_sha256(path)
+        stat = path.stat()
+
+        current = documents.get(rel, {})
+        if current.get("sha256") == digest and not current.get("skipped"):
+            skipped += 1
+            continue
+
         print(f"[{idx}/{total}] Indexing {rel}...", flush=True)
         try:
+            if collection_initialized:
+                delete_document(client, rel)
+
             chunks = build_chunks(path)
             if not chunks:
-                continue
-            vectors = embed([chunk.text for chunk in chunks])
-            doc_points = []
-            for chunk, vector in zip(chunks, vectors, strict=False):
-                point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{chunk.metadata['path']}:{chunk.metadata['chunk_index']}"))
-                doc_points.append(
+                documents[rel] = {
+                    "sha256": digest,
+                    "mtime": stat.st_mtime,
+                    "size": stat.st_size,
+                    "chunks": 0,
+                }
+            else:
+                vectors = embed([chunk.text for chunk in chunks])
+                # BUG-2 guard: if embed() returns nothing (TEI unhealthy), force a retry next run
+                if len(vectors) != len(chunks):
+                    raise RuntimeError(
+                        f"embed() returned {len(vectors)} vectors for {len(chunks)} chunks"
+                    )
+                doc_points = [
                     models.PointStruct(
-                        id=point_id,
+                        id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{chunk.metadata['path']}:{chunk.metadata['chunk_index']}")),
                         vector=vector,
                         payload={**chunk.metadata, "text": chunk.text},
                     )
-                )
-            if doc_points:
-                if not collection_initialized:
-                    ensure_collection(len(doc_points[0].vector))
-                    collection_initialized = True
-                
-                # Batch upsert points for the document just in case it is very large
-                batch_size = 100
-                for i in range(0, len(doc_points), batch_size):
-                    batch = doc_points[i : i + batch_size]
-                    qdrant().upsert(collection_name=collection_name(), points=batch, wait=True)
-                chunks_written += len(doc_points)
+                    for chunk, vector in zip(chunks, vectors)
+                ]
+                if doc_points:
+                    if not collection_initialized:
+                        # BUG-8: reuse same client, not a new connection
+                        ensure_collection(client, len(doc_points[0].vector))
+                        collection_initialized = True
+
+                    # Batch upsert to avoid oversized requests for large documents
+                    batch_size = 100
+                    for i in range(0, len(doc_points), batch_size):
+                        client.upsert(collection_name=name, points=doc_points[i : i + batch_size], wait=True)
+                    chunks_written += len(doc_points)
+
+                documents[rel] = {
+                    "sha256": digest,
+                    "mtime": stat.st_mtime,
+                    "size": stat.st_size,
+                    "chunks": len(doc_points),
+                }
+            changed += 1
         except Exception as exc:
-            errors.append({"path": path.relative_to(source_path()).as_posix(), "reason": str(exc)})
+            errors.append({"path": rel, "reason": str(exc)})
             print(f"  ✗ Error indexing {rel}: {exc}", flush=True)
+            # BUG-2: mark as skipped=True so next run retries (sha256 alone won't trigger retry)
+            documents[rel] = {
+                "sha256": digest,
+                "mtime": stat.st_mtime,
+                "size": stat.st_size,
+                "chunks": 0,
+                "skipped": True,
+                "error": str(exc),
+            }
+            changed += 1
 
-    if not collection_initialized:
-        ensure_collection(env_int("RAG_HASH_EMBEDDING_DIM", 384))
+        # BUG-6: Incremental save only after this file was processed (not on every iteration)
+        manifest["updated_at"] = time.time()
+        manifest["embedding_model"] = env("RAG_EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
+        manifest["embedding_backend"] = env("RAG_DOCKER_EMBEDDING_BACKEND", "tei")
+        save_manifest(manifest)
 
-    print(f"Indexing completed successfully. Total chunks written: {chunks_written}", flush=True)
-    return {"documents": len(files), "chunks_written": chunks_written, "errors": errors}
+    pruned = 0
+    to_prune = [rel for rel in documents if rel not in seen]
+    for rel in to_prune:
+        print(f"Pruning deleted document {rel}...", flush=True)
+        if collection_initialized:
+            delete_document(client, rel)
+        del documents[rel]
+        pruned += 1
+
+    manifest["updated_at"] = time.time()
+    manifest["embedding_model"] = env("RAG_EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
+    manifest["embedding_backend"] = env("RAG_DOCKER_EMBEDDING_BACKEND", "tei")
+    save_manifest(manifest)
+
+    print(f"Indexing completed: {changed} changed, {skipped} skipped, {pruned} pruned. Total chunks written: {chunks_written}", flush=True)
+    return {
+        "documents": len(files),
+        "chunks_written": chunks_written,
+        "changed": changed,
+        "skipped": skipped,
+        "pruned": pruned,
+        "errors": errors
+    }
 
 
 def search(query: str, top_k: int | None = None) -> dict[str, Any]:
@@ -511,10 +639,75 @@ def format_markdown(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def source_fingerprint(root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in scan_files():
+        try:
+            stat = path.stat()
+            rel = path.relative_to(root).as_posix()
+            digest.update(rel.encode("utf-8", errors="replace"))
+            digest.update(b"\0")
+            digest.update(str(stat.st_mtime_ns).encode("ascii"))
+            digest.update(b"\0")
+            digest.update(str(stat.st_size).encode("ascii"))
+            digest.update(b"\0")
+        except OSError:
+            continue
+    return digest.hexdigest()
+
+
+def watch_loop() -> None:
+    interval = env_int("RAG_WATCH_INTERVAL_SECONDS", 20)
+    debounce = env_int("RAG_WATCH_DEBOUNCE_SECONDS", 3)
+    interval = max(2, interval)
+    debounce = max(0, debounce)
+    root = source_path()
+    
+    print(f"[Watcher] Starting RAG file watcher. interval={interval}s, debounce={debounce}s, path={root}", flush=True)
+    
+    # Wait for the service to be healthy (specifically, Qdrant/Tika/TEI to be up)
+    time.sleep(5)
+    
+    # Run initial index if RAG_AUTO_INDEX_ON_START is true
+    if env_bool("RAG_AUTO_INDEX_ON_START", True):
+        print("[Watcher] Running initial RAG indexing on startup...", flush=True)
+        try:
+            index_documents()
+        except Exception as exc:
+            print(f"[Watcher] Initial indexing failed: {exc}", flush=True)
+
+    previous = source_fingerprint(root)
+    while True:
+        try:
+            time.sleep(interval)
+            current = source_fingerprint(root)
+            if current != previous:
+                print(f"[Watcher] Change detected in {root}. Debouncing for {debounce}s...", flush=True)
+                if debounce:
+                    time.sleep(debounce)
+                # BUG-1: use lock — skip if manual /index is already running
+                if _index_lock.acquire(blocking=False):
+                    try:
+                        print("[Watcher] Changes stabilized. Triggering indexing...", flush=True)
+                        index_documents()
+                    finally:
+                        _index_lock.release()
+                else:
+                    print("[Watcher] Indexing already in progress, skipping this trigger.", flush=True)
+                # BUG-12: recompute AFTER indexing so changes during the run aren't missed
+                previous = source_fingerprint(root)
+        except Exception as exc:
+            print(f"[Watcher] Error in watcher loop: {exc}", flush=True)
+
+
 def serve() -> None:
     import uvicorn
 
-    app = FastAPI(title="Docker RAG API", version="0.5.2")
+    if env_bool("RAG_AUTO_INDEX", True):
+        watcher_thread = threading.Thread(target=watch_loop, daemon=True)
+        watcher_thread.start()
+
+    app = FastAPI(title="Docker RAG API", version="0.5.3")
 
     @app.get("/health")
     def health_route() -> dict[str, Any]:
@@ -522,7 +715,13 @@ def serve() -> None:
 
     @app.post("/index")
     async def index_route(_: Request) -> dict[str, Any]:
-        return index_documents()
+        # BUG-1: return 409 if watcher is already indexing
+        if not _index_lock.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail="Indexing already in progress")
+        try:
+            return index_documents()
+        finally:
+            _index_lock.release()
 
     @app.post("/search")
     async def search_route(request: Request) -> dict[str, Any]:

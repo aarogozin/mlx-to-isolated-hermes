@@ -125,8 +125,14 @@ repair_corrupted_env() {
       substep "Repairing corrupted ANSI entries in .env..."
       local temp_env="${ENV_FILE}.tmp"
       grep -vE '(\x1b|\[1m|\?  |n8n API Key)' "${ENV_FILE}" > "${temp_env}" || true
-      mv "${temp_env}" "${ENV_FILE}"
-      ok ".env file repaired (removed corrupted entries)"
+      # Guard: never replace .env with an empty file
+      if [[ -s "${temp_env}" ]]; then
+        mv "${temp_env}" "${ENV_FILE}"
+        ok ".env file repaired (removed corrupted entries)"
+      else
+        rm -f "${temp_env}"
+        warn "repair_corrupted_env: all lines matched the corruption pattern — skipping repair to avoid wiping .env"
+      fi
     fi
   fi
 }
@@ -959,7 +965,7 @@ configure_rag() {
     local sync_path
     sync_path="$(env_get SYNCTHING_SYNC_PATH)"
     if [[ -z "${sync_path}" ]]; then
-      sync_path="/Users/tonyr/hermes"
+      sync_path="${HOME}/hermes"
     fi
     env_put SYNCTHING_SYNC_PATH "${sync_path}"
     ok "Syncthing sync path: ${sync_path}"
