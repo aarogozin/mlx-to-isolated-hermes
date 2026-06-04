@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.5.24 — 2026-06-04
+
+Comprehensive hardening and bug fix pass across the Docker RAG service, container startup scripts, and setup wizard:
+
+### 🔴 Critical fixes
+
+- **RAG Concurrency Race Condition** (`rag-container-api.py`): Added a `threading.Lock` (`_index_lock`) to prevent the background file-watcher thread and the `POST /index` HTTP endpoint from running `index_documents()` simultaneously. Concurrent runs would corrupt the manifest JSON and produce non-deterministic Qdrant upserts. Watcher now skips its trigger if indexing is already in progress; the API returns HTTP 409 instead.
+- **Silent Document Drop on Embed Failure** (`rag-container-api.py`): If `embed()` returned fewer vectors than expected (e.g. TEI returned an empty batch silently), documents were recorded with `chunks: 0` but *without* `skipped: True`, causing `sha256` to match on the next run and the document to be permanently invisible to search. Fixed by validating `len(vectors) == len(chunks)` and raising `RuntimeError` on mismatch so the doc is properly flagged for retry.
+- **Silent TEI Fallback** (`rag-container-api.py`): `except Exception: pass` in `tei_embeddings()` was swallowing primary-endpoint errors. Now logs a `Warning:` message before falling back to `/embed`, making network issues visible in container logs.
+
+### 🟠 High-priority fixes
+
+- **Dead if/else in Chromium Install** (`docker-control.sh`, `telegram-control.sh`): Both branches of the inner `if/else` ran identical `apt-get install chromium` commands — the condition was meaningless dead code. Collapsed to a single unconditional install when the configured path is missing.
+- **Missing Login Shell in Container Provisioning** (`docker-create.sh`): The `-l` (login shell) flag was accidentally removed from the `write_data_volume` heredoc runner, meaning `/etc/profile` was not sourced. With `set -euo pipefail` active, any tool relying on the login PATH (e.g. `uv` in `/usr/local/bin`) would produce `command not found` and abort container provisioning silently. Restored `-l`.
+- **O(n) Manifest Writes During Indexing** (`rag-container-api.py`): The condition `if changed > 0` was always true after the first file, causing a full manifest JSON write on *every* subsequent file iteration (even skipped ones). With thousands of notes this meant thousands of unnecessary disk writes. Fixed to write manifest only when the *current* file was actually modified.
+- **Post-Index Fingerprint TOCTOU** (`rag-container-api.py`): The file-watcher was setting `previous = current` using a fingerprint computed *before* `index_documents()` ran. Files that changed *during* a long indexing pass were silently missed. Fingerprint is now recomputed *after* indexing completes.
+- **Multiple Qdrant Client Instances** (`rag-container-api.py`): `ensure_collection()` was creating its own `QdrantClient` connection instead of reusing the one already open in `index_documents()`. Now accepts the client as a parameter, eliminating the extra connection.
+
+### 🟡 Medium fixes
+
+- **TEI Service Missing CPU Limit** (`docker-compose.rag.yml`): The `tei` (Text Embeddings Inference) service had no `cpus:` limit while every other CPU-heavy service (`docling`, `playwright`, `firecrawl-api`) was constrained. Added `cpus: '4.0'` to prevent full core saturation on Apple Silicon.
+- **Misleading Error Message for Missing Volume Variable** (`docker-compose.rag.yml`): The volume bind for the RAG source directory used `${RAG_SOURCE_MOUNT}` but the error message instructed users to set `RAG_SOURCE_PATH` — a different, unrelated variable. Fixed message to name the correct variable.
+- **Hidden docker-create.sh Errors in Telegram Gateway** (`telegram-control.sh`): `docker-create.sh` output was piped to `/dev/null`, masking any container provisioning failures and causing `docker_start_and_patch()` to run against a non-existent container with cryptic follow-up errors. Removed the redirect.
+
+### 🟢 Low-priority fixes
+
+- **Hardcoded Developer Path in Setup Wizard** (`setup.sh`): The Syncthing default sync path was hardcoded as `/Users/tonyr/hermes` — the original developer's home directory. Changed to portable `${HOME}/hermes`.
+- **`.env` Wipe Risk in `repair_corrupted_env`** (`setup.sh`): If all lines in `.env` matched the corruption pattern, `grep -v` returned an empty file and `|| true` silently allowed overwriting `.env` with nothing, wiping all user configuration. Added a file-size guard: repair is skipped with a warning if the filtered output is empty.
+
+
 ## 0.5.23 — 2026-06-01
 
 Fix setup wizard prompt UI output leakage and add configuration auto-healing:
