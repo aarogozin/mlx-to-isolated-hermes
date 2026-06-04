@@ -37,6 +37,10 @@ services:
       RAG_OCR_LANGUAGES: ${RAG_OCR_LANGUAGES:-rus+eng+deu}
       RAG_OCR_MIN_TEXT_CHARS: ${RAG_OCR_MIN_TEXT_CHARS:-200}
       RAG_OCR_MAX_PAGES: ${RAG_OCR_MAX_PAGES:-25}
+      RAG_AUTO_INDEX: ${RAG_AUTO_INDEX:-1}
+      RAG_AUTO_INDEX_ON_START: ${RAG_AUTO_INDEX_ON_START:-1}
+      RAG_WATCH_INTERVAL_SECONDS: ${RAG_WATCH_INTERVAL_SECONDS:-20}
+      RAG_WATCH_DEBOUNCE_SECONDS: ${RAG_WATCH_DEBOUNCE_SECONDS:-3}
       RAG_DOCKER_EMBEDDING_BACKEND: ${RAG_DOCKER_EMBEDDING_BACKEND:-tei}
       RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
       RAG_HASH_EMBEDDING_DIM: ${RAG_HASH_EMBEDDING_DIM:-384}
@@ -46,8 +50,8 @@ services:
       RAG_TIKA_URL: http://tika:9998
       RAG_DOCLING_URL: http://docling:5001
     volumes:
-      # Documents source — read-only. Set RAG_SOURCE_PATH in .env.
-      - ${RAG_SOURCE_MOUNT:?Set RAG_SOURCE_PATH in .env}:/source:ro
+      # Documents source — read-only. Set RAG_SOURCE_MOUNT in .env (host path to your RAG documents folder).
+      - ${RAG_SOURCE_MOUNT:?Set RAG_SOURCE_MOUNT in .env (host path to your RAG documents directory)}:/source:ro
       - ./scripts:/app/scripts:ro
       # venv and cache use Docker volumes so pip installs survive restarts.
       - rag-api-venv:/venv
@@ -79,6 +83,7 @@ services:
     deploy:
       resources:
         limits:
+          cpus: '4.0'
           memory: 3G
 
   tika:
@@ -99,6 +104,7 @@ services:
     deploy:
       resources:
         limits:
+          cpus: '2.0'
           memory: 3G
 
   playwright-service:

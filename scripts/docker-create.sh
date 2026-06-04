@@ -134,6 +134,19 @@ if ! docker image inspect "${DOCKER_IMAGE}" > /dev/null 2>&1; then
   docker pull --platform "${DOCKER_PLATFORM}" "${DOCKER_IMAGE}"
 fi
 
+# Detect Chromium binary inside the Docker image before creating the container
+echo "Detecting Chromium binary inside image ${DOCKER_IMAGE}..."
+DETECTED_CHROMIUM=$(docker run --rm --platform "${DOCKER_PLATFORM}" --entrypoint /bin/sh "${DOCKER_IMAGE}" -c 'find /opt/hermes/.playwright -type f -executable \( -name '\''chrome'\'' -o -name '\''chromium'\'' -o -name '\''chrome-headless-shell'\'' -o -name '\''chromium-browser'\'' -o -name '\''headless_shell'\'' \) 2>/dev/null | head -n 1' || true)
+
+if [[ -n "${DETECTED_CHROMIUM}" ]]; then
+  echo "Detected Chromium inside image: ${DETECTED_CHROMIUM}"
+  AGENT_BROWSER_EXECUTABLE_PATH="${DETECTED_CHROMIUM}"
+else
+  echo "No pre-installed Chromium found in image. Defaulting to system chromium (/usr/bin/chromium)"
+  AGENT_BROWSER_EXECUTABLE_PATH="/usr/bin/chromium"
+fi
+
+
 served_models_json="$(curl -fsS --max-time 3 -H "Authorization: Bearer ${OPENAI_API_KEY}" "${OPENAI_BASE_URL:-http://localhost:8000/v1}/models" 2>/dev/null || true)"
 if [[ -n "${served_models_json}" ]]; then
   detected_model="$(printf '%s' "${served_models_json}" | jq -r '.data[0].id // empty' 2>/dev/null || true)"
@@ -187,11 +200,13 @@ write_data_volume() {
     -e BRAVE_API_KEY="${BRAVE_API_KEY}" \
     -e GITHUB_PERSONAL_ACCESS_TOKEN="${GITHUB_PERSONAL_ACCESS_TOKEN}" \
     -e N8N_API_KEY="${N8N_API_KEY:-}" \
+    -e AGENT_BROWSER_EXECUTABLE_PATH="${AGENT_BROWSER_EXECUTABLE_PATH}" \
     -v "${SCRIPT_DIR}/rag-search-bridge.sh:/tmp/rag-search:ro" \
     -v "${data_mount}" \
     -v "${workspace_mount}" \
+    --entrypoint /bin/bash \
     "${DOCKER_IMAGE}" \
-    /bin/bash -lc 'set -euo pipefail
+    -lc 'set -euo pipefail
 mkdir -p /opt/data/logs /opt/data/workspace /opt/data/.local/bin
 cat > /opt/data/.env <<EOF
 OPENAI_BASE_URL=${OPENAI_BASE_URL}
@@ -230,6 +245,7 @@ api_key = sys.argv[3]
 brave_key = sys.argv[4]
 github_token = sys.argv[5]
 n8n_key = sys.argv[6]
+chromium_path = sys.argv[7] if len(sys.argv) > 7 else "/usr/bin/chromium"
 
 config_path = Path("/opt/data/config.yaml")
 
@@ -270,7 +286,7 @@ default_mcp_servers = {
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
         "env": {
-            "PUPPETEER_EXECUTABLE_PATH": "/usr/bin/chromium",
+            "PUPPETEER_EXECUTABLE_PATH": chromium_path,
             "DOCKER_CONTAINER": "true"
         },
         "enabled": True
@@ -374,7 +390,7 @@ else:
 
 with open(config_path, "w") as f:
     yaml.safe_dump(data, f, default_flow_style=False)
-'\'' "${MODEL_NAME}" "${OPENAI_BASE_URL}" "${OPENAI_API_KEY}" "${BRAVE_API_KEY:-}" "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" "${N8N_API_KEY:-}"
+'\'' "${MODEL_NAME}" "${OPENAI_BASE_URL}" "${OPENAI_API_KEY}" "${BRAVE_API_KEY:-}" "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" "${N8N_API_KEY:-}" "${AGENT_BROWSER_EXECUTABLE_PATH}"
 install -m 0755 /tmp/rag-search /opt/data/.local/bin/rag-search
 mkdir -p /opt/data/skills/local-rag
 cat > /opt/data/skills/local-rag/SKILL.md <<'EOF'
@@ -433,8 +449,10 @@ fi
   -e HERMES_DASHBOARD_INSECURE="${HERMES_DASHBOARD_INSECURE}" \
   -e HERMES_YOLO_MODE="${HERMES_YOLO_MODE:-}" \
   -e HF_HOME=/opt/data/.cache/huggingface \
+  -e UV_CACHE_DIR=/opt/data/.cache/uv \
+  -e npm_config_cache=/opt/data/.cache/npm \
   -e DOCKER_CONTAINER=true \
-  -e AGENT_BROWSER_EXECUTABLE_PATH="/usr/bin/chromium" \
+  -e AGENT_BROWSER_EXECUTABLE_PATH="${AGENT_BROWSER_EXECUTABLE_PATH}" \
   -e PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   "${mount_args[@]}" \
   "${DOCKER_IMAGE}" \

@@ -117,16 +117,24 @@ docker_start_and_patch() {
   docker exec -u root "${DOCKER_NAME}" python3 -c 'p="/opt/hermes/hermes_cli/web_server.py"; c=open(p).read(); c=c.replace("return client_host in _LOOPBACK_HOSTS", "return True"); c=c.replace("return hmac.compare_digest(token.encode(), _SESSION_TOKEN.encode())", "return True"); open(p,"w").write(c)' >/dev/null 2>&1 || true
   docker exec -u root "${DOCKER_NAME}" /command/s6-svc -r /run/service/dashboard >/dev/null 2>&1 || true
 
+  # Ensure cache directories exist and are owned by hermes:
+  docker exec -u root "${DOCKER_NAME}" mkdir -p /opt/data/.cache/uv /opt/data/.cache/npm /opt/data/.cache/huggingface 2>/dev/null || true
+  docker exec -u root "${DOCKER_NAME}" chown -R hermes:hermes /opt/data/.cache 2>/dev/null || true
+
   # Ensure faster-whisper is installed in virtualenv
   if ! docker exec "${DOCKER_NAME}" /opt/hermes/.venv/bin/python3 -c "import faster_whisper" >/dev/null 2>&1; then
     echo "Pre-installing faster-whisper inside container virtualenv..."
-    docker exec -u root "${DOCKER_NAME}" /usr/local/bin/uv pip install --python /opt/hermes/.venv/bin/python3 faster-whisper >/dev/null 2>&1 || true
+    docker exec -e UV_CACHE_DIR=/opt/data/.cache/uv "${DOCKER_NAME}" /usr/local/bin/uv pip install --python /opt/hermes/.venv/bin/python3 faster-whisper >/dev/null 2>&1 || true
   fi
 
-  # Ensure chromium is installed inside container for Puppeteer MCP
-  if ! docker exec "${DOCKER_NAME}" sh -c "command -v chromium" >/dev/null 2>&1; then
-    echo "Pre-installing chromium inside container (required for Puppeteer)..."
-    docker exec -u root "${DOCKER_NAME}" sh -c "apt-get update && apt-get install -y --no-install-recommends --fix-missing chromium" >/dev/null 2>&1 || true
+  # Resolve Chromium executable path from container env
+  local chromium_path
+  chromium_path=$(docker exec "${DOCKER_NAME}" sh -c 'echo "${AGENT_BROWSER_EXECUTABLE_PATH:-/usr/bin/chromium}"' 2>/dev/null || echo "/usr/bin/chromium")
+
+  # Ensure chromium is installed inside container if the configured path doesn't exist
+  if ! docker exec "${DOCKER_NAME}" test -x "${chromium_path}" > /dev/null 2>&1; then
+    echo "Chromium not found at '${chromium_path}'. Pre-installing system chromium..."
+    docker exec -u root "${DOCKER_NAME}" sh -c "apt-get update && apt-get install -y --no-install-recommends --fix-missing chromium" > /dev/null 2>&1 || true
   fi
 
   # Restart main gateway services to reload Chromium binary paths and environment
