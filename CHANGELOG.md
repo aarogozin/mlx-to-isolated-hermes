@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.25 — 2026-06-05
+
+Add unified `make update` command to update all stack components in one step:
+
+- **`scripts/update.sh`** — New orchestrator script that updates each active component in order:
+  1. Git repo self-update (`git pull --ff-only`, non-fatal on local changes)
+  2. oMLX via Homebrew (`brew upgrade jundot/omlx/omlx`, skipped if `MODEL_BACKEND` is not `omlx`)
+  3. Agent container — `docker pull` + recreate (Hermes or OpenClaw depending on `AGENT_RUNTIME`)
+  4. RAG Docker stack — `docker compose pull` for all services + restart if running (skipped if `RAG_ENABLED=0`)
+  5. LM Studio note (cannot be automated — macOS app)
+- **Dry-run mode** (`--dry-run` / `make update-dry-run`) — shows exactly what would happen without modifying anything.
+- **Per-component skip flags** — `--skip-git`, `--skip-omlx`, `--skip-agent`, `--skip-rag` for selective updates.
+- **Non-fatal steps** — a failure in any single component does not abort the rest; a summary table at the end shows what succeeded, warned, failed, or was skipped.
+- **Image change detection** — shows before/after image digest so you can see what actually changed vs. what was already current.
+- **Makefile targets** — `make update` and `make update-dry-run` added with help entries.
+- **README** — new "Updating the Stack" section documenting all update options.
+
 ## 0.5.24 — 2026-06-04
 
 Comprehensive hardening and bug fix pass across the Docker RAG service, container startup scripts, and setup wizard:
