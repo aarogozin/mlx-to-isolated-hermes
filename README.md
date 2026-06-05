@@ -159,6 +159,45 @@ make agent-update    # pull latest Hermes or OpenClaw image, restart, keep all d
 
 ---
 
+## Updating the Stack
+
+Run a single command to update all active components at once:
+
+```bash
+make update
+```
+
+This updates in order:
+1. **Git repo** — `git pull --ff-only` (latest scripts and configs)
+2. **oMLX** — `brew upgrade` (if `MODEL_BACKEND=omlx`)
+3. **Agent** — pulls latest Hermes / OpenClaw image and recreates the container
+4. **RAG stack** — `docker compose pull` for all RAG services, then restarts if running
+
+Preview what would happen without making changes:
+
+```bash
+make update-dry-run
+```
+
+Skip individual components:
+
+```bash
+./scripts/update.sh --skip-git --skip-omlx     # agent + RAG only
+./scripts/update.sh --skip-rag                 # git + oMLX + agent only
+```
+
+Update individual components separately:
+
+```bash
+make omlx-update     # oMLX only (brew upgrade)
+make agent-update    # Hermes or OpenClaw image only
+make rag-update      # RAG Docker images only
+```
+
+> **LM Studio** is a macOS app and must be updated manually via its built-in updater.
+
+---
+
 ## Knowledge Sources
 
 The agent has two distinct ways to access your content:
