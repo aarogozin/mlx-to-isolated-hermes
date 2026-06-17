@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.27 - 2026-06-17
 
 - Add `make mcp-doctor` for safe MCP configuration inspection and local no-op smoke checks.
 - Add `make rag-why` for explainable RAG results with scores, source types, extractors, OCR usage, and excerpts.
