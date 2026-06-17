@@ -32,7 +32,7 @@ while IFS= read -r -d '' script; do
 done < <(find scripts -type f -name '*.sh' -print0)
 
 log "Checking Python syntax and RAG unit tests"
-python3 -m py_compile scripts/models-doctor.py scripts/rag.py
+python3 -m py_compile scripts/models-doctor.py scripts/rag.py scripts/rag-container-api.py scripts/check-english-text.py scripts/release-notes.py
 "${SCRIPT_DIR}/test-rag-unit.sh"
 
 log "Checking release metadata"
@@ -118,6 +118,10 @@ else
 fi
 
 log "Checking daemon control surfaces"
+if [[ -x "${SCRIPT_DIR}/mcp-doctor.sh" ]]; then
+  "${SCRIPT_DIR}/mcp-doctor.sh" --quiet || echo "warn MCP doctor needs attention; run make mcp-doctor"
+fi
+
 if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
   "${SCRIPT_DIR}/telegram-control.sh" doctor
 else

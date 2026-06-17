@@ -2,9 +2,9 @@ SHELL := /bin/bash
 
 .PHONY: help bootstrap setup doctor clean-all release-check ci-check matrix-e2e \
 	models-search models-list models-sync models-doctor models-prune-incomplete model-select model-start-bg model-stop-bg model-check omlx-update \
-	rag-install rag-preflight rag-index rag-sync rag-search rag-start rag-stop rag-status rag-doctor rag-up rag-down rag-logs rag-index-status rag-update \
+	rag-install rag-preflight rag-index rag-sync rag-search rag-why rag-start rag-stop rag-status rag-doctor rag-up rag-down rag-logs rag-index-status rag-update \
 	agent-start agent-stop agent-restart agent-pause agent-switch agent-status agent-logs agent-shell agent-open-dashboard agent-update agent-data \
-	update update-dry-run
+	mcp-doctor stack-smoke release-notes update update-dry-run
 
 help:
 	@printf '%s\n' 'mlx-to-isolated-agent commands'
@@ -23,6 +23,7 @@ help:
 	@printf '  %-24s %s\n' 'make rag-preflight' 'Verify Docker RAG images before pulling'
 	@printf '  %-24s %s\n' 'make rag-sync' 'Index source and start RAG service'
 	@printf '  %-24s %s\n' 'make rag-search QUERY=...' 'Search local RAG'
+	@printf '  %-24s %s\n' 'make rag-why QUERY=...' 'Explain RAG matches, extractors, and scores'
 	@printf '  %-24s %s\n' 'make rag-index-status' 'Show indexing progress (files done, %)'
 	@printf '  %-24s %s\n' 'make rag-up' 'Start Dockerized RAG'
 	@printf '  %-24s %s\n' 'make rag-down' 'Stop Dockerized RAG'
@@ -34,12 +35,15 @@ help:
 	@printf '  %-24s %s\n' 'make agent-data' 'Show agent data directory on host'
 	@printf '  %-24s %s\n' 'make agent-open-dashboard' 'Open Dashboard/Control UI'
 	@printf '  %-24s %s\n' 'make agent-shell' 'Shell into selected sandbox'
+	@printf '  %-24s %s\n' 'make mcp-doctor' 'Inspect and smoke-test agent MCP servers'
 	@printf '\n%s\n' 'Update:'
 	@printf '  %-24s %s\n' 'make update' 'Update all stack components (oMLX, agent, RAG, optional services)'
 	@printf '  %-24s %s\n' 'make update-dry-run' 'Preview what update would do without applying changes'
+	@printf '  %-24s %s\n' 'make stack-smoke' 'Verify model API, RAG bridge, dashboard, and optional services'
 	@printf '\n%s\n' 'Release:'
 	@printf '  %-24s %s\n' 'make ci-check' 'Fast local CI-equivalent checks'
 	@printf '  %-24s %s\n' 'make release-check' 'Full local release gate'
+	@printf '  %-24s %s\n' 'make release-notes' 'Generate release-note draft from git tags'
 
 bootstrap:
 	./scripts/bootstrap-macos.sh
@@ -116,6 +120,10 @@ rag-search:
 	@test -n "$(QUERY)" || (echo 'Usage: make rag-search QUERY="your query"' >&2; exit 2)
 	./scripts/rag-control.sh search "$(QUERY)"
 
+rag-why:
+	@test -n "$(QUERY)" || (echo 'Usage: make rag-why QUERY="your query"' >&2; exit 2)
+	./scripts/rag-why.sh "$(QUERY)"
+
 rag-start:
 	./scripts/rag-control.sh start
 
@@ -179,6 +187,15 @@ agent-update:
 
 agent-data:
 	./scripts/docker-control.sh data-path
+
+mcp-doctor:
+	./scripts/mcp-doctor.sh
+
+stack-smoke:
+	./scripts/stack-smoke.sh
+
+release-notes:
+	./scripts/release-notes.py
 
 update:
 	./scripts/update.sh

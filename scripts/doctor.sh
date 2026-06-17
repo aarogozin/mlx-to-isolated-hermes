@@ -177,6 +177,13 @@ main() {
   check_docker
   check_model_api
   check_rag
+  if [[ -x "${SCRIPT_DIR}/mcp-doctor.sh" ]]; then
+    if "${SCRIPT_DIR}/mcp-doctor.sh" --quiet; then
+      pass "MCP doctor"
+    else
+      warn "MCP doctor needs attention; run make mcp-doctor"
+    fi
+  fi
 
   printf '\nDoctor finished: %s failure(s), %s warning(s)\n' "${failures}" "${warnings}"
 

@@ -85,7 +85,7 @@ if command -v jq >/dev/null 2>&1; then
       (.results | to_entries | map(
         "\n" + ((.key + 1) | tostring) + ". " + (.value.path // "") + " - " + (.value.heading // .value.title // "") +
         "\n   score: " + ((.value.score // 0) | tostring) +
-        "\n   " + (.value.excerpt // "")
+        "\n   " + (.value.excerpt // .value.text // "")
       ) | join("\n"))
     end'
 else

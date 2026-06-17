@@ -8,7 +8,7 @@ serves them through an OpenAI-compatible API, and an optional RAG service
 indexes your documents. The agent runs in Docker with its data visible on the
 host filesystem.
 
-**Version:** `0.5.20`
+**Version:** `0.5.26`
 
 ---
 
@@ -232,6 +232,7 @@ RAG_SOURCE_PATH=/Users/you/documents        # RAG indexes here, agent cannot bro
 ```bash
 make rag-index-status   # indexing progress
 make rag-search QUERY="what did we decide about X?"
+make rag-why QUERY="what did we decide about X?"
 make rag-status
 # Wipe index and reindex from scratch:
 # docker volume rm mlx-isolated-rag_rag-qdrant && make rag-up && make rag-index
@@ -263,6 +264,7 @@ make agent-shell            # open a shell inside the agent container
 make agent-open-dashboard   # open the web dashboard / control UI
 make agent-update           # pull latest image, restart, keep data
 make agent-data             # show host data directory
+make mcp-doctor             # list and smoke-test configured MCP servers
 ```
 
 ---
@@ -342,6 +344,8 @@ Key variables:
 ```bash
 make ci-check                              # shell syntax + unit tests
 make release-check
+make stack-smoke                           # runtime smoke after updates
+make release-notes                         # draft changelog section
 make matrix-e2e                            # full sandbox matrix (optional)
 ```
 

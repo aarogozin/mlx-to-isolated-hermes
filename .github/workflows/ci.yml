@@ -12,6 +12,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   shell:
     name: Static and mock checks
@@ -24,15 +27,20 @@ jobs:
           find scripts -name '*.sh' -print0 \
             | xargs -0 -I{} bash -n {}
 
+      - name: Check diff hygiene
+        run: git diff --check
+
       - name: Check tracked text is English-only
         run: scripts/check-english-text.py
 
-
       - name: Python syntax and RAG unit tests
         run: |
-          python3 -m py_compile scripts/models-doctor.py scripts/rag.py scripts/rag-container-api.py scripts/check-english-text.py
+          python3 -m py_compile scripts/models-doctor.py scripts/rag.py scripts/rag-container-api.py scripts/check-english-text.py scripts/release-notes.py
           RAG_EMBEDDING_BACKEND=hash scripts/test-rag-unit.sh
           RAG_EMBEDDING_BACKEND=hash scripts/test-rag-ocr-smoke.sh
+
+      - name: MCP doctor mock
+        run: scripts/mcp-doctor.sh --mock
 
       - name: Release check without host-only e2e
         run: |

@@ -1,6 +1,6 @@
 # Release Checklist
 
-## 0.4.0
+## Current Release
 
 1. Start from a clean public workspace.
 2. Run host bootstrap and diagnostics:
@@ -31,6 +31,7 @@
    make rag-up
    make rag-sync
    make rag-search QUERY="release smoke"
+   make rag-why QUERY="release smoke"
    make rag-status
    ```
 
@@ -53,6 +54,8 @@
 
    ```bash
    make models-doctor
+   make mcp-doctor
+   make stack-smoke
    ```
 
    Use `make models-prune-incomplete` only for artifacts that are clearly stale/incomplete.
@@ -65,10 +68,11 @@
    AGENT_RUNTIME=openclaw SANDBOX_BACKEND=docker make agent-pause
    ```
 
-10. Run final release gate:
+9. Run final release gate:
 
    ```bash
    make release-check
+   make release-notes
    ```
 
    For a full local sandbox matrix before tagging, run:
@@ -77,7 +81,7 @@
    make matrix-e2e
    ```
 
-11. Confirm no local runtime state is tracked:
+10. Confirm no local runtime state is tracked:
 
    ```bash
    git status --short
@@ -85,11 +89,11 @@
    scripts/check-english-text.py
    ```
 
-12. Commit, tag, and push:
+11. Commit, tag, and push:
 
    ```bash
    git add .
-   git commit -m "Release 0.4.0"
-   git tag v0.4.0
+   git commit -m "Release x.y.z"
+   git tag vx.y.z
    git push origin HEAD --tags
    ```

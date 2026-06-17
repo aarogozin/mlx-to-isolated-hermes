@@ -2,7 +2,7 @@
 # scripts/update.sh — Update all oMLX stack components.
 #
 # Usage:
-#   ./scripts/update.sh [--dry-run] [--skip-git] [--skip-omlx] [--skip-agent] [--skip-rag]
+#   ./scripts/update.sh [--dry-run] [--skip-git] [--skip-omlx] [--skip-agent] [--skip-rag] [--skip-smoke]
 #
 # Updates in order:
 #   1. Git repo self-update   (git pull --ff-only, non-fatal)
@@ -41,6 +41,7 @@ SKIP_GIT=0
 SKIP_OMLX=0
 SKIP_AGENT=0
 SKIP_RAG=0
+SKIP_SMOKE="${SKIP_UPDATE_SMOKE:-0}"
 
 for arg in "$@"; do
   case "${arg}" in
@@ -49,13 +50,14 @@ for arg in "$@"; do
     --skip-omlx)  SKIP_OMLX=1 ;;
     --skip-agent) SKIP_AGENT=1 ;;
     --skip-rag)   SKIP_RAG=1 ;;
+    --skip-smoke) SKIP_SMOKE=1 ;;
     -h|--help)
       grep '^#' "${BASH_SOURCE[0]}" | head -20 | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
       printf "Unknown flag: %s\n" "${arg}" >&2
-      printf "Usage: %s [--dry-run] [--skip-git] [--skip-omlx] [--skip-agent] [--skip-rag]\n" "$0" >&2
+      printf "Usage: %s [--dry-run] [--skip-git] [--skip-omlx] [--skip-agent] [--skip-rag] [--skip-smoke]\n" "$0" >&2
       exit 2
       ;;
   esac
@@ -294,7 +296,27 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 5: LM Studio note (cannot be automated — macOS GUI app)
+# STEP 5: Post-update smoke test
+# ─────────────────────────────────────────────────────────────────────────────
+if [[ "${DRY_RUN}" -eq 1 ]]; then
+  result_skip "Post-update smoke (dry-run)"
+elif [[ "${SKIP_SMOKE}" == "1" || "${SKIP_SMOKE}" == "true" ]]; then
+  result_skip "Post-update smoke (skipped)"
+elif [[ "${#RESULTS_FAIL[@]}" -gt 0 ]]; then
+  result_skip "Post-update smoke (skipped because update had failures)"
+else
+  step "Post-update smoke"
+  if "${SCRIPT_DIR}/stack-smoke.sh" 2>&1 | while IFS= read -r line; do info "${line}"; done; then
+    ok "Post-update smoke passed"
+    result_ok "Post-update smoke — passed"
+  else
+    fail "Post-update smoke failed"
+    result_fail "Post-update smoke — failed"
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 6: LM Studio note (cannot be automated — macOS GUI app)
 # ─────────────────────────────────────────────────────────────────────────────
 if [[ "${MODEL_BACKEND}" == "lmstudio" ]]; then
   step "LM Studio"

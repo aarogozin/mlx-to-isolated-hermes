@@ -587,8 +587,13 @@ def search(query: str, top_k: int | None = None) -> dict[str, Any]:
                 "source_type": payload.get("source_type", ""),
                 "extractor": payload.get("extractor", ""),
                 "ocr_used": payload.get("ocr_used", False),
+                "ocr_languages": payload.get("ocr_languages", ""),
                 "chunk_index": payload.get("chunk_index", 0),
+                "mtime": payload.get("mtime", 0),
+                "sha256": payload.get("sha256", ""),
+                "extension": payload.get("extension", ""),
                 "text": payload.get("text", ""),
+                "excerpt": payload.get("text", "")[:800],
             }
         )
     return {"query": query, "results": hits}

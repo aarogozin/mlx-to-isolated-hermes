@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Add `make mcp-doctor` for safe MCP configuration inspection and local no-op smoke checks.
+- Add `make rag-why` for explainable RAG results with scores, source types, extractors, OCR usage, and excerpts.
+- Add `make stack-smoke` and wire it into `make update` as a post-update verification step.
+- Add `make release-notes` to draft concise release notes from git history.
+- Harden GitHub Actions with Node 24 opt-in, diff hygiene checks, MCP mock checks, and disabled Go cache when no `go.sum` exists.
+
 ## 0.5.26 - 2026-06-17
 
 Harden the Docker-first local agent stack and RAG runtime:

@@ -37,6 +37,7 @@ make rag-preflight
 make rag-up
 make rag-sync
 make rag-search QUERY="project release notes"
+make rag-why QUERY="project release notes"
 make rag-status
 make rag-doctor
 make rag-down
@@ -92,6 +93,14 @@ rag-search --json "telegram daemon conflict"
 ```
 
 The agent should call this tool before answering questions about local notes, source documents, or project memory. The project does not automatically inject RAG context into every prompt.
+
+For debugging retrieval quality, use:
+
+```bash
+make rag-why QUERY="project release notes"
+```
+
+It prints source paths, scores, extractor names, OCR usage, chunk indexes, and excerpts so you can see why a result was returned.
 
 ## API
 
