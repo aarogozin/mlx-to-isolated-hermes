@@ -32,6 +32,8 @@ OVERRIDE_N8N_ENABLED_SET="${N8N_ENABLED+x}"
 OVERRIDE_N8N_ENABLED="${N8N_ENABLED:-}"
 OVERRIDE_N8N_PORT_SET="${N8N_PORT+x}"
 OVERRIDE_N8N_PORT="${N8N_PORT:-}"
+OVERRIDE_FIRECRAWL_LOCAL_ENABLED_SET="${FIRECRAWL_LOCAL_ENABLED+x}"
+OVERRIDE_FIRECRAWL_LOCAL_ENABLED="${FIRECRAWL_LOCAL_ENABLED:-}"
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -58,6 +60,9 @@ fi
 if [[ -n "${OVERRIDE_N8N_PORT_SET}" ]]; then
   N8N_PORT="${OVERRIDE_N8N_PORT}"
 fi
+if [[ -n "${OVERRIDE_FIRECRAWL_LOCAL_ENABLED_SET}" ]]; then
+  FIRECRAWL_LOCAL_ENABLED="${OVERRIDE_FIRECRAWL_LOCAL_ENABLED}"
+fi
 if [[ -n "${OVERRIDE_RAG_INDEX_PATH_SET}" ]]; then
   RAG_INDEX_PATH="${OVERRIDE_RAG_INDEX_PATH}"
 fi
@@ -74,11 +79,12 @@ N8N_PORT="${N8N_PORT:-5678}"
 N8N_BIND_HOST="${N8N_BIND_HOST:-127.0.0.1}"
 N8N_HOST="${N8N_HOST:-localhost}"
 N8N_TIMEZONE="${N8N_TIMEZONE:-Europe/Berlin}"
+FIRECRAWL_LOCAL_ENABLED="${FIRECRAWL_LOCAL_ENABLED:-0}"
 RAG_RUNTIME="${OVERRIDE_RAG_RUNTIME:-${RAG_RUNTIME:-docker}}"
 RAG_INDEX_PATH="${RAG_INDEX_PATH:-.runtime/rag}"
 RAG_DOCKER_INDEX_PATH="${RAG_DOCKER_INDEX_PATH:-.runtime/rag-docker}"
 RAG_HOST="${OVERRIDE_RAG_HOST:-${RAG_HOST:-127.0.0.1}}"
-RAG_BIND_HOST="${OVERRIDE_RAG_BIND_HOST:-${RAG_BIND_HOST:-0.0.0.0}}"
+RAG_BIND_HOST="${OVERRIDE_RAG_BIND_HOST:-${RAG_BIND_HOST:-127.0.0.1}}"
 RAG_PORT="${OVERRIDE_RAG_PORT:-${RAG_PORT:-8765}}"
 RAG_VENV_PATH="${RAG_VENV_PATH:-.runtime/rag-venv}"
 RAG_EMBEDDING_BACKEND="${RAG_EMBEDDING_BACKEND:-sentence-transformers}"
@@ -116,23 +122,10 @@ RAG_DOCKER_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.rag.yml"
 RAG_DOCKER_PROJECT="${RAG_DOCKER_PROJECT:-mlx-isolated-rag}"
 RAG_DOCKER_NAME="${RAG_DOCKER_NAME:-mlx-isolated-rag}"
 RAG_API_IMAGE="${RAG_API_IMAGE:-python:3.12-slim}"
-RAG_DOCKER_EMBEDDING_BACKEND="${RAG_DOCKER_EMBEDDING_BACKEND:-tei}"
+RAG_DOCKER_EMBEDDING_BACKEND="${RAG_DOCKER_EMBEDDING_BACKEND:-hash}"
 RAG_QDRANT_IMAGE="${RAG_QDRANT_IMAGE:-qdrant/qdrant:latest}"
 
-if [[ "$(uname -m)" == "arm64" || "$(uname -m)" == "aarch64" ]]; then
-  DEFAULT_TEI_IMAGE="ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-latest"
-else
-  DEFAULT_TEI_IMAGE="ghcr.io/huggingface/text-embeddings-inference:cpu-latest"
-fi
-RAG_TEI_IMAGE="${RAG_TEI_IMAGE:-${DEFAULT_TEI_IMAGE}}"
-
-# Automatically translate cpu-latest to cpu-arm64-latest on arm64 hosts to prevent download failures.
-if [[ "$(uname -m)" == "arm64" || "$(uname -m)" == "aarch64" ]]; then
-  if [[ "${RAG_TEI_IMAGE}" == *"cpu-latest" ]]; then
-    echo "Notice: Translating TEI CPU image to arm64 version for Apple Silicon / ARM host."
-    RAG_TEI_IMAGE="${RAG_TEI_IMAGE/cpu-latest/cpu-arm64-latest}"
-  fi
-fi
+RAG_TEI_IMAGE="${RAG_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-latest}"
 
 RAG_TIKA_IMAGE="${RAG_TIKA_IMAGE:-apache/tika:latest-full}"
 RAG_DOCLING_IMAGE="${RAG_DOCLING_IMAGE:-quay.io/docling-project/docling-serve:latest}"
@@ -266,6 +259,9 @@ docker_compose() {
   if [[ "${N8N_ENABLED}" == "1" || "${N8N_ENABLED}" == "true" ]]; then
     profiles+=("n8n")
   fi
+  if [[ "${FIRECRAWL_LOCAL_ENABLED}" == "1" || "${FIRECRAWL_LOCAL_ENABLED}" == "true" ]]; then
+    profiles+=("firecrawl")
+  fi
   
   if [[ "${#profiles[@]}" -gt 0 ]]; then
     local compose_profiles
@@ -351,6 +347,28 @@ docker_images_present() {
   done < <(docker_required_images)
 }
 
+normalize_docker_host_path() {
+  local path="$1"
+  case "${path}" in
+    /host_mnt/*) printf '/%s\n' "${path#/host_mnt/}" ;;
+    *) printf '%s\n' "${path}" ;;
+  esac
+}
+
+docker_current_source_mount() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker inspect "${RAG_DOCKER_NAME}" \
+    --format '{{range .Mounts}}{{if eq .Destination "/source"}}{{.Source}}{{end}}{{end}}' \
+    2>/dev/null || true
+}
+
+docker_source_mount_matches() {
+  local expected actual
+  expected="$(normalize_docker_host_path "$(rag_source_path)")"
+  actual="$(normalize_docker_host_path "$(docker_current_source_mount)")"
+  [[ -n "${actual}" && "${actual}" == "${expected}" ]]
+}
+
 docker_rag_running() {
   command -v docker >/dev/null 2>&1 \
     && docker container inspect "${RAG_DOCKER_NAME}" >/dev/null 2>&1 \
@@ -395,7 +413,9 @@ docker_preflight() {
 docker_index() {
   ensure_enabled
   docker_start
-  docker_compose exec -T rag-api /venv/bin/python /app/scripts/rag-container-api.py index "$@"
+  mkdir -p "${RAG_DOCKER_INDEX_ABS}"
+  docker_compose exec -T rag-api /venv/bin/python /app/scripts/rag-container-api.py index "$@" 2>&1 \
+    | tee "${RAG_DOCKER_INDEX_ABS}/rag-index.log"
 }
 
 docker_start() {
@@ -413,7 +433,14 @@ docker_start() {
     die "Host RAG is already listening on http://${RAG_HOST}:${RAG_PORT}. Stop it with RAG_RUNTIME=host make rag-stop before starting Docker RAG."
   fi
   docker_image_preflight
-  docker_compose up -d
+  if docker_rag_running && ! docker_source_mount_matches; then
+    echo "RAG source mount changed; recreating ${RAG_DOCKER_NAME} with current RAG_SOURCE_PATH."
+    echo "  current: $(normalize_docker_host_path "$(docker_current_source_mount)")"
+    echo "  expected: $(normalize_docker_host_path "$(rag_source_path)")"
+    docker_compose up -d --force-recreate rag-api
+  else
+    docker_compose up -d
+  fi
   wait_docker_api
   if [[ "${SYNCTHING_ENABLED}" == "1" || "${SYNCTHING_ENABLED}" == "true" ]]; then
     "${SCRIPT_DIR}/syncthing-auto-config.py" || echo "Warning: Syncthing auto-configuration failed."
@@ -422,7 +449,7 @@ docker_start() {
 }
 
 docker_stop() {
-  RAG_COMPOSE_ALLOW_MISSING_SOURCE=1 docker_compose down
+  RAG_COMPOSE_ALLOW_MISSING_SOURCE=1 docker_compose down --remove-orphans
 }
 
 docker_status() {
@@ -655,13 +682,17 @@ status_service() {
 index_status() {
   local log_file
   if [[ "${RAG_RUNTIME}" == "docker" ]]; then
-    log_file="${RAG_DOCKER_INDEX_ABS}/rag-index.log"
+    log_file="$(mktemp)"
+    docker logs --tail "${RAG_INDEX_STATUS_LOG_LINES:-5000}" "${RAG_DOCKER_NAME}" >"${log_file}" 2>&1 || true
   else
     log_file="${RAG_INDEX_ABS}/rag-index.log"
   fi
 
   if [[ ! -f "${log_file}" ]]; then
     echo "rag_index=not_started  (no log found at ${log_file})"
+    if [[ "${RAG_RUNTIME}" == "docker" ]]; then
+      rm -f "${log_file}"
+    fi
     return 0
   fi
 
@@ -673,13 +704,23 @@ index_status() {
     total="${BASH_REMATCH[2]}"
   fi
 
+  local completed=0
+  if grep -q "Indexing completed:" "${log_file}"; then
+    completed=1
+    if [[ "${total}" -gt 0 ]]; then
+      current="${total}"
+    fi
+  fi
+
   # Last file that was being indexed
   local last_file
   last_file="$(grep -o '\[[0-9]*/[0-9]*\] Indexing [^:]*' "${log_file}" 2>/dev/null | sed 's/\[[0-9]*\/[0-9]*\] Indexing //' | tail -1 || true)"
 
   # Detect if indexer process is still alive
   local running=0
-  if pgrep -f "rag-control.sh index" > /dev/null 2>&1 || pgrep -f "rag-control index" > /dev/null 2>&1; then
+  if [[ "${RAG_RUNTIME}" == "docker" && "${current}" -lt "${total}" && "${completed}" -eq 0 ]]; then
+    running=1
+  elif pgrep -f "rag-control.sh index" > /dev/null 2>&1 || pgrep -f "rag-control index" > /dev/null 2>&1; then
     running=1
   fi
 
@@ -687,7 +728,7 @@ index_status() {
     local pct=$(( current * 100 / total ))
     if [[ "${running}" -eq 1 ]]; then
       printf "rag_index=running   %d/%d files (%d%%)\n" "${current}" "${total}" "${pct}"
-    elif [[ "${current}" -ge "${total}" ]]; then
+    elif [[ "${current}" -ge "${total}" || "${completed}" -eq 1 ]]; then
       printf "rag_index=complete  %d/%d files (100%%)\n" "${current}" "${total}"
     else
       printf "rag_index=stopped   %d/%d files (%d%%) — run 'make rag-index' to resume\n" "${current}" "${total}" "${pct}"
@@ -699,6 +740,10 @@ index_status() {
     else
       echo "rag_index=unknown  (no progress found in log — run 'make rag-index' to start)"
     fi
+  fi
+
+  if [[ "${RAG_RUNTIME}" == "docker" ]]; then
+    rm -f "${log_file}"
   fi
 }
 

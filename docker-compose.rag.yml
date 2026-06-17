@@ -41,7 +41,7 @@ services:
       RAG_AUTO_INDEX_ON_START: ${RAG_AUTO_INDEX_ON_START:-1}
       RAG_WATCH_INTERVAL_SECONDS: ${RAG_WATCH_INTERVAL_SECONDS:-20}
       RAG_WATCH_DEBOUNCE_SECONDS: ${RAG_WATCH_DEBOUNCE_SECONDS:-3}
-      RAG_DOCKER_EMBEDDING_BACKEND: ${RAG_DOCKER_EMBEDDING_BACKEND:-tei}
+      RAG_DOCKER_EMBEDDING_BACKEND: ${RAG_DOCKER_EMBEDDING_BACKEND:-hash}
       RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
       RAG_HASH_EMBEDDING_DIM: ${RAG_HASH_EMBEDDING_DIM:-384}
       RAG_QDRANT_URL: http://qdrant:6333
@@ -50,7 +50,7 @@ services:
       RAG_TIKA_URL: http://tika:9998
       RAG_DOCLING_URL: http://docling:5001
     volumes:
-      # Documents source — read-only. Set RAG_SOURCE_MOUNT in .env (host path to your RAG documents folder).
+      # Documents source — read-only. scripts/rag-control.sh maps RAG_SOURCE_PATH to RAG_SOURCE_MOUNT.
       - ${RAG_SOURCE_MOUNT:?Set RAG_SOURCE_MOUNT in .env (host path to your RAG documents directory)}:/source:ro
       - ./scripts:/app/scripts:ro
       # venv and cache use Docker volumes so pip installs survive restarts.
@@ -71,7 +71,7 @@ services:
       - rag-qdrant:/qdrant/storage
 
   tei:
-    image: ${RAG_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-latest}
+    image: ${RAG_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-latest}
     container_name: ${RAG_TEI_NAME:-mlx-isolated-rag-tei}
     profiles: ["tei"]
     restart: unless-stopped
@@ -110,6 +110,7 @@ services:
   playwright-service:
     image: ghcr.io/firecrawl/playwright-service:latest
     container_name: mlx-firecrawl-playwright
+    profiles: ["firecrawl"]
     restart: unless-stopped
     environment:
       PORT: 3000
@@ -130,6 +131,7 @@ services:
   firecrawl-api:
     image: ghcr.io/firecrawl/firecrawl:latest
     container_name: mlx-firecrawl-api
+    profiles: ["firecrawl"]
     restart: unless-stopped
     command: node dist/src/harness.js --start-docker
     environment:
@@ -173,12 +175,14 @@ services:
   redis:
     image: redis:alpine
     container_name: mlx-firecrawl-redis
+    profiles: ["firecrawl"]
     restart: unless-stopped
     command: redis-server --bind 0.0.0.0
 
   rabbitmq:
     image: rabbitmq:3-management
     container_name: mlx-firecrawl-rabbitmq
+    profiles: ["firecrawl"]
     restart: unless-stopped
     command: rabbitmq-server
     healthcheck:
@@ -191,6 +195,7 @@ services:
   nuq-postgres:
     image: ghcr.io/firecrawl/nuq-postgres:latest
     container_name: mlx-firecrawl-postgres
+    profiles: ["firecrawl"]
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${FIRECRAWL_POSTGRES_USER:-postgres}
@@ -207,7 +212,7 @@ services:
       - PGID=0
     volumes:
       - rag-syncthing-config:/var/syncthing/config
-      - ${SYNCTHING_SYNC_MOUNT:?Set SYNCTHING_SYNC_PATH in .env}:/var/syncthing/Sync
+      - ${SYNCTHING_SYNC_MOUNT:-.}:/var/syncthing/Sync
     ports:
       - "${SYNCTHING_BIND_HOST:-127.0.0.1}:${SYNCTHING_PORT:-8384}:8384"
       - "22000:22000/tcp"
@@ -243,4 +248,3 @@ volumes:
   rag-cache:
   rag-syncthing-config:
   rag-n8n-data:
-

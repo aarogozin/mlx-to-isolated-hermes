@@ -240,16 +240,13 @@ else
       "${RAG_TIKA_IMAGE:-apache/tika:latest-full}"
       "${RAG_DOCLING_IMAGE:-quay.io/docling-project/docling-serve:latest}"
     )
-    if [[ "${RAG_DOCKER_EMBEDDING_BACKEND:-tei}" == "tei" ]]; then
-      if [[ "$(uname -m)" == "arm64" || "$(uname -m)" == "aarch64" ]]; then
-        rag_images+=("${RAG_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-latest}")
-      else
-        rag_images+=("${RAG_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-latest}")
-      fi
+    if [[ "${RAG_DOCKER_EMBEDDING_BACKEND:-hash}" == "tei" ]]; then
+      rag_images+=("${RAG_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-latest}")
     fi
     # Optional profiles
     [[ "${N8N_ENABLED:-0}" == "1" ]] && rag_images+=("n8nio/n8n:latest")
     [[ "${SYNCTHING_ENABLED:-0}" == "1" ]] && rag_images+=("syncthing/syncthing:latest")
+    [[ "${FIRECRAWL_LOCAL_ENABLED:-0}" == "1" ]] && rag_images+=("ghcr.io/firecrawl/firecrawl:latest" "ghcr.io/firecrawl/playwright-service:latest" "redis:alpine" "rabbitmq:3-management" "ghcr.io/firecrawl/nuq-postgres:latest")
 
     for img in "${rag_images[@]}"; do
       info "Will pull: ${img}"

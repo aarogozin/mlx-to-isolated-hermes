@@ -332,7 +332,7 @@ def tei_embeddings(texts: list[str]) -> list[list[float]]:
 
 
 def embed(texts: list[str]) -> list[list[float]]:
-    backend = env("RAG_DOCKER_EMBEDDING_BACKEND", "tei")
+    backend = env("RAG_DOCKER_EMBEDDING_BACKEND", "hash")
     if backend == "hash":
         return [hash_embedding(text) for text in texts]
     return tei_embeddings(texts)
@@ -440,7 +440,7 @@ def index_documents() -> dict[str, Any]:
     
     # Recreate collection if schemas or parameters change
     model_changed = manifest.get("embedding_model") != env("RAG_EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
-    backend_changed = manifest.get("embedding_backend") != env("RAG_DOCKER_EMBEDDING_BACKEND", "tei")
+    backend_changed = manifest.get("embedding_backend") != env("RAG_DOCKER_EMBEDDING_BACKEND", "hash")
     recreate = (name not in existing) or model_changed or backend_changed
     
     if recreate:
@@ -535,7 +535,7 @@ def index_documents() -> dict[str, Any]:
         # BUG-6: Incremental save only after this file was processed (not on every iteration)
         manifest["updated_at"] = time.time()
         manifest["embedding_model"] = env("RAG_EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
-        manifest["embedding_backend"] = env("RAG_DOCKER_EMBEDDING_BACKEND", "tei")
+        manifest["embedding_backend"] = env("RAG_DOCKER_EMBEDDING_BACKEND", "hash")
         save_manifest(manifest)
 
     pruned = 0
@@ -549,7 +549,7 @@ def index_documents() -> dict[str, Any]:
 
     manifest["updated_at"] = time.time()
     manifest["embedding_model"] = env("RAG_EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
-    manifest["embedding_backend"] = env("RAG_DOCKER_EMBEDDING_BACKEND", "tei")
+    manifest["embedding_backend"] = env("RAG_DOCKER_EMBEDDING_BACKEND", "hash")
     save_manifest(manifest)
 
     print(f"Indexing completed: {changed} changed, {skipped} skipped, {pruned} pruned. Total chunks written: {chunks_written}", flush=True)

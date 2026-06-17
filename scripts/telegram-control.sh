@@ -183,9 +183,14 @@ EOF
 docker_start_and_patch() {
   clean_gateway_locks
   docker start "${DOCKER_NAME}" >/dev/null
-  # Apply WebSocket loopback gate patch and restart dashboard service:
-  docker exec -u root "${DOCKER_NAME}" python3 -c 'p="/opt/hermes/hermes_cli/web_server.py"; c=open(p).read(); c=c.replace("return client_host in _LOOPBACK_HOSTS", "return True"); c=c.replace("return hmac.compare_digest(token.encode(), _SESSION_TOKEN.encode())", "return True"); open(p,"w").write(c)' >/dev/null 2>&1 || true
-  docker exec -u root "${DOCKER_NAME}" /command/s6-svc -r /run/service/dashboard >/dev/null 2>&1 || true
+  if [[ "${HERMES_DASHBOARD_AUTH_BYPASS_PATCH:-0}" == "1" ]]; then
+    echo "WARNING: applying explicit Hermes dashboard auth bypass patch."
+    docker exec -u root "${DOCKER_NAME}" python3 -c 'p="/opt/hermes/hermes_cli/web_server.py"; c=open(p).read(); c=c.replace("return client_host in _LOOPBACK_HOSTS", "return True"); c=c.replace("return hmac.compare_digest(token.encode(), _SESSION_TOKEN.encode())", "return True"); open(p,"w").write(c)' >/dev/null 2>&1 || true
+    docker exec -u root "${DOCKER_NAME}" /command/s6-svc -r /run/service/dashboard >/dev/null 2>&1 || true
+  fi
+
+  # Apply tool search bridge argument flattening compatibility patch:
+  docker exec -u root "${DOCKER_NAME}" python3 -c 'p="/opt/hermes/tools/tool_search.py"; c=open(p).read(); c=c.replace("raw_args = args.get(\"arguments\")\n    if raw_args is None:\n        raw_args = {}", "raw_args = args.get(\"arguments\")\n    if raw_args is None or (isinstance(raw_args, dict) and not raw_args):\n        flat_args = {k: v for k, v in args.items() if k not in (\"name\", \"arguments\")}\n        if flat_args:\n            raw_args = flat_args\n    if raw_args is None:\n        raw_args = {}"); open(p,"w").write(c)' >/dev/null 2>&1 || true
 
   # Ensure cache directories exist and are owned by hermes:
   docker exec -u root "${DOCKER_NAME}" mkdir -p /opt/data/.cache/uv /opt/data/.cache/npm /opt/data/.cache/huggingface 2>/dev/null || true
@@ -223,7 +228,9 @@ docker_start_and_patch() {
 
 docker_ensure() {
   command -v docker > /dev/null 2>&1 || die "docker CLI missing."
-  "${SCRIPT_DIR}/docker-create.sh"
+  if ! docker container inspect "${DOCKER_NAME}" >/dev/null 2>&1; then
+    "${SCRIPT_DIR}/docker-create.sh"
+  fi
   docker_start_and_patch
 }
 

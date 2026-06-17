@@ -293,7 +293,7 @@ The Docker stack includes optional orchestration profiles to extend capabilities
 * **Purpose**: Sync your active documents and Obsidian vault between your Mac host and mobile devices (e.g. iPhone) or other computers securely without using third-party cloud servers.
 * **Enable**: Set `SYNCTHING_ENABLED=1` in `.env` and restart via `make rag-down && make rag-up`.
 * **Ports**: Web GUI is exposed on `http://127.0.0.1:8384`. Sync protocol ports `22000` (TCP/UDP) and discovery port `21027` (UDP) are open to allow direct connections.
-* **Auto-configuration**: The startup process automatically generates the `.stfolder` marker and configures the `hermes` sync folder pointing to your host path `/Users/tonyr/hermes/`.
+* **Auto-configuration**: The startup process automatically generates the `.stfolder` marker and configures the `hermes` sync folder from `SYNCTHING_SYNC_PATH`.
 * **iOS/Android Clients**: Use **Möbius Sync** on iOS or the official **Syncthing** client on Android.
 
 ### 2. n8n (Workflow Automation & MCP Server)

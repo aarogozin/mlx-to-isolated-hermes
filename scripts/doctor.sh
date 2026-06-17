@@ -75,8 +75,6 @@ check_lms() {
   fi
 }
 
-# VM / SSH / Multipass checks removed
-
 check_docker() {
   if [[ -d "/Applications/Docker.app" ]]; then
     pass "Docker.app"

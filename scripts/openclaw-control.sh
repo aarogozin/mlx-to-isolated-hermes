@@ -187,7 +187,7 @@ docker_prepare_volumes() {
     -lc 'mkdir -p /home/node/.openclaw/workspace /home/node/.openclaw/skills/local-rag /home/node/.config/openclaw && cp /tmp/rag-search /home/node/.openclaw/rag-search && chmod 0755 /home/node/.openclaw/rag-search && cat > /home/node/.openclaw/skills/local-rag/SKILL.md <<'"'"'EOF'"'"'
 # Local RAG
 
-Use `rag-search "query"` before answering questions that may depend on local notes, Obsidian vault content, project knowledge, or personal documents. Prefer a focused search query, cite the returned note path when useful, and do not claim the local knowledge base has no answer until `rag-search` returns no relevant results.
+Use the rag-search command before answering questions that may depend on local notes, Obsidian vault content, project knowledge, or personal documents. Prefer a focused search query, cite the returned note path when useful, and do not claim the local knowledge base has no answer until rag-search returns no relevant results.
 EOF
 chown -R 1000:1000 /home/node/.openclaw /home/node/.config/openclaw'
 }

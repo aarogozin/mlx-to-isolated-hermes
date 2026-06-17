@@ -21,6 +21,7 @@ DOCKER_NAME="${DOCKER_NAME:-omlx-agent-docker}"
 HERMES_DASHBOARD_PORT="${HERMES_DASHBOARD_PORT:-9119}"
 DOCKER_DASHBOARD_PORT="${DOCKER_DASHBOARD_PORT:-9120}"
 HERMES_DASHBOARD_TUI="${HERMES_DASHBOARD_TUI:-0}"
+HERMES_DASHBOARD_AUTH_BYPASS_PATCH="${HERMES_DASHBOARD_AUTH_BYPASS_PATCH:-0}"
 LOCAL_DASHBOARD_HOST="${LOCAL_DASHBOARD_HOST:-127.0.0.1}"
 
 usage() {
@@ -46,14 +47,18 @@ port_listening() {
 
 docker_start_and_patch() {
   docker start "${DOCKER_NAME}" >/dev/null
-  # Apply WebSocket loopback gate patch and restart dashboard service:
-  docker exec -u root "${DOCKER_NAME}" python3 -c 'p="/opt/hermes/hermes_cli/web_server.py"; c=open(p).read(); c=c.replace("return client_host in _LOOPBACK_HOSTS", "return True"); c=c.replace("return hmac.compare_digest(token.encode(), _SESSION_TOKEN.encode())", "return True"); open(p,"w").write(c)' >/dev/null 2>&1 || true
-  docker exec -u root "${DOCKER_NAME}" /command/s6-svc -r /run/service/dashboard >/dev/null 2>&1 || true
+  if [[ "${HERMES_DASHBOARD_AUTH_BYPASS_PATCH}" == "1" ]]; then
+    echo "WARNING: applying explicit Hermes dashboard auth bypass patch."
+    docker exec -u root "${DOCKER_NAME}" python3 -c 'p="/opt/hermes/hermes_cli/web_server.py"; c=open(p).read(); c=c.replace("return client_host in _LOOPBACK_HOSTS", "return True"); c=c.replace("return hmac.compare_digest(token.encode(), _SESSION_TOKEN.encode())", "return True"); open(p,"w").write(c)' >/dev/null 2>&1 || true
+    docker exec -u root "${DOCKER_NAME}" /command/s6-svc -r /run/service/dashboard >/dev/null 2>&1 || true
+  fi
 }
 
 docker_ensure() {
   command -v docker >/dev/null 2>&1 || die "docker CLI missing."
-  "${SCRIPT_DIR}/docker-create.sh" >/dev/null
+  if ! docker container inspect "${DOCKER_NAME}" >/dev/null 2>&1; then
+    "${SCRIPT_DIR}/docker-create.sh" >/dev/null
+  fi
   docker_start_and_patch
 }
 

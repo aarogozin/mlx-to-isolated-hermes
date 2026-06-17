@@ -42,6 +42,7 @@ DOCKER_MEMORY="${DOCKER_MEMORY:-4g}"
 DOCKER_SHM_SIZE="${DOCKER_SHM_SIZE:-1g}"
 HERMES_DASHBOARD_PORT="${HERMES_DASHBOARD_PORT:-9119}"
 HERMES_DASHBOARD_INSECURE="${HERMES_DASHBOARD_INSECURE:-}"
+HERMES_DASHBOARD_AUTH_BYPASS_PATCH="${HERMES_DASHBOARD_AUTH_BYPASS_PATCH:-0}"
 DOCKER_DASHBOARD_PORT="${OVERRIDE_DOCKER_DASHBOARD_PORT:-${DOCKER_DASHBOARD_PORT:-9120}}"
 HERMES_GATEWAY_API_PORT="${HERMES_GATEWAY_API_PORT:-8642}"
 DOCKER_GATEWAY_API_PORT="${OVERRIDE_DOCKER_GATEWAY_API_PORT:-${DOCKER_GATEWAY_API_PORT:-8642}}"
@@ -201,6 +202,10 @@ write_data_volume() {
     -e GITHUB_PERSONAL_ACCESS_TOKEN="${GITHUB_PERSONAL_ACCESS_TOKEN}" \
     -e N8N_API_KEY="${N8N_API_KEY:-}" \
     -e AGENT_BROWSER_EXECUTABLE_PATH="${AGENT_BROWSER_EXECUTABLE_PATH}" \
+    -e FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}" \
+    -e FIRECRAWL_API_URL="${FIRECRAWL_API_URL:-}" \
+    -e FIRECRAWL_LOCAL_ENABLED="${FIRECRAWL_LOCAL_ENABLED:-0}" \
+    -e LINEAR_MCP_ENABLED="${LINEAR_MCP_ENABLED:-0}" \
     -v "${SCRIPT_DIR}/rag-search-bridge.sh:/tmp/rag-search:ro" \
     -v "${data_mount}" \
     -v "${workspace_mount}" \
@@ -235,8 +240,12 @@ append_env_if_set BRAVE_API_KEY "${BRAVE_API_KEY}"
 append_env_if_set GITHUB_PERSONAL_ACCESS_TOKEN "${GITHUB_PERSONAL_ACCESS_TOKEN}"
 append_env_if_set N8N_API_KEY "${N8N_API_KEY:-}"
 append_env_if_set OBSIDIAN_WATCH_INTERVAL_SECONDS "${OBSIDIAN_WATCH_INTERVAL_SECONDS:-}"
+append_env_if_set FIRECRAWL_API_KEY "${FIRECRAWL_API_KEY:-}"
+append_env_if_set FIRECRAWL_API_URL "${FIRECRAWL_API_URL:-}"
+append_env_if_set FIRECRAWL_LOCAL_ENABLED "${FIRECRAWL_LOCAL_ENABLED:-}"
+append_env_if_set LINEAR_MCP_ENABLED "${LINEAR_MCP_ENABLED:-}"
 /opt/hermes/.venv/bin/python3 -c '\''
-import yaml, sys
+import yaml, sys, os
 from pathlib import Path
 
 model_name = sys.argv[1]
@@ -248,6 +257,20 @@ n8n_key = sys.argv[6]
 chromium_path = sys.argv[7] if len(sys.argv) > 7 else "/usr/bin/chromium"
 
 config_path = Path("/opt/data/config.yaml")
+
+firecrawl_key = os.environ.get("FIRECRAWL_API_KEY", "").strip()
+firecrawl_local_enabled = os.environ.get("FIRECRAWL_LOCAL_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+firecrawl_enabled = bool(firecrawl_key) or firecrawl_local_enabled
+if not firecrawl_key:
+    firecrawl_key = "dummy"
+firecrawl_url = os.environ.get("FIRECRAWL_API_URL", "").strip()
+if not firecrawl_url:
+    if firecrawl_local_enabled:
+        firecrawl_url = "http://host.docker.internal:3002"
+    else:
+        firecrawl_url = "https://api.firecrawl.dev"
+
+linear_mcp_enabled = os.environ.get("LINEAR_MCP_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
 
 default_mcp_servers = {
     "brave-search": {
@@ -300,10 +323,10 @@ default_mcp_servers = {
         "command": "npx",
         "args": ["-y", "firecrawl-mcp"],
         "env": {
-            "FIRECRAWL_API_KEY": "dummy",
-            "FIRECRAWL_API_URL": "http://host.docker.internal:3002"
+            "FIRECRAWL_API_KEY": firecrawl_key,
+            "FIRECRAWL_API_URL": firecrawl_url
         },
-        "enabled": True
+        "enabled": firecrawl_enabled
     },
     "n8n": {
         "command": "npx",
@@ -385,6 +408,11 @@ if config_path.exists():
                 data["mcp_servers"][k]["enabled"] = bool(github_token)
             elif k == "n8n":
                 data["mcp_servers"][k]["enabled"] = bool(n8n_key)
+            elif k == "firecrawl":
+                data["mcp_servers"][k]["enabled"] = firecrawl_enabled
+
+    if "linear" in data["mcp_servers"] and not linear_mcp_enabled:
+        data["mcp_servers"]["linear"]["enabled"] = False
 else:
     data = new_config
 
@@ -396,7 +424,7 @@ mkdir -p /opt/data/skills/local-rag
 cat > /opt/data/skills/local-rag/SKILL.md <<'EOF'
 # Local RAG
 
-Use `rag-search "query"` before answering questions that may depend on local notes, Obsidian vault content, project knowledge, or personal documents. Prefer a focused search query, cite the returned note path when useful, and do not claim the local knowledge base has no answer until `rag-search` returns no relevant results. The tool queries the local Docker RAG API at ${RAG_BASE_URL}.
+Use the rag-search command before answering questions that may depend on local notes, Obsidian vault content, project knowledge, or personal documents. Prefer a focused search query, cite the returned note path when useful, and do not claim the local knowledge base has no answer until rag-search returns no relevant results. The tool queries the local Docker RAG API at ${RAG_BASE_URL}.
 EOF
 chmod 600 /opt/data/.env /opt/data/config.yaml'
 }
@@ -406,6 +434,7 @@ write_data_volume
 mount_args=(
   -v "${data_mount}"
   -v "${workspace_mount}"
+  -v "${SCRIPT_DIR}/rag-search-bridge.sh:/usr/local/bin/rag-search:ro"
 )
 
 if [[ -S "/var/run/docker.sock" || -e "/var/run/docker.sock" ]]; then
@@ -448,6 +477,7 @@ fi
   -e HERMES_DASHBOARD_TUI="${HERMES_DASHBOARD_TUI:-0}" \
   -e HERMES_DASHBOARD_INSECURE="${HERMES_DASHBOARD_INSECURE}" \
   -e HERMES_YOLO_MODE="${HERMES_YOLO_MODE:-}" \
+  -e RAG_BASE_URL="${RAG_BASE_URL_DOCKER}" \
   -e HF_HOME=/opt/data/.cache/huggingface \
   -e UV_CACHE_DIR=/opt/data/.cache/uv \
   -e npm_config_cache=/opt/data/.cache/npm \
